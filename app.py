@@ -45,6 +45,29 @@ with tab1:
         
         df = pd.DataFrame({'Demand': np.floor(np.clip(generated, 0, None))})
 
+    # --- Collapsible Raw Data Table (Right after Configuration) ---
+    if df is not None:
+        with st.expander("🔢 View / Download Raw Data Table", expanded=False):
+            # Prep dataframe with a 'Period' index label
+            raw_display_df = df.copy()
+            raw_display_df.index.name = "Period"
+            
+            # Setup columns inside the expander to split table and download button
+            exp_col1, exp_col2 = st.columns([3, 1])
+            with exp_col1:
+                st.dataframe(raw_display_df, use_container_width=True, height=250)
+            with exp_col2:
+                st.markdown("#### Export Data")
+                st.caption("Download this exact dataset as a CSV file for offline use.")
+                csv_data = raw_display_df.to_csv(index=True).encode('utf-8')
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv_data,
+                    file_name="demand_data.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
     # --- 2. Advanced Analysis (Thresholds & Percentiles) ---
     if df is not None:
         st.divider()
@@ -81,7 +104,7 @@ with tab1:
         
         st.divider()
         
-        # Create two side-by-side columns below the chart for the descriptive tables
+        # Two side-by-side columns under the chart
         table_col1, table_col2 = st.columns([1, 1])
 
         with table_col1:
