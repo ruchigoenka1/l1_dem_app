@@ -5,6 +5,10 @@ import plotly.express as px
 import io
 import plotly.graph_objects as go
 
+# --- Session State Initialization ---
+if 'next_clicked' not in st.session_state:
+    st.session_state.next_clicked = False
+
 st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
 st.title("🚀 Supply Chain Analytics Platform")
@@ -14,7 +18,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "�
 with tab1:
     st.header("⚖️ The Flaw of Averages Stress Test")
     
-    # --- Step 1: Strategy Input Section ---
+    # --- Input Section ---
     col1, col2 = st.columns(2)
     
     with col1:
@@ -22,24 +26,31 @@ with tab1:
         working_days = st.number_input("Working Days per Year", value=300)
         
     with col2:
-        # Calculate Average Daily Sales (ADS) for reference
         avg_daily_sales = annual_sales / working_days
         st.metric("Avg. Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
         
-        # User explicitly inputs the inventory they think they need
-        # Defaulting to 10 days of average sales as a baseline
+        suggested_baseline = avg_daily_sales * 10
         requisite_inventory = st.number_input(
             "Enter Requisite Inventory for the Lead Time", 
-            value=int(avg_daily_sales * 10)
+            value=int(suggested_baseline)
         )
 
-    # --- Step 2: The Reveal ---
+    # Trigger the persistent state
     if st.button("Next"):
-        # Demand Generation Controls
-        std_dev = st.slider("Demand Standard Deviation (Volatility)", 0, 50, 10)
-        sim_days = st.slider("Number of Simulation Days", 1, 30, 10) # Added as requested
+        st.session_state.next_clicked = True
 
-        # Generate Demand Data using ADS and Volatility
+    # --- Persisted Section ---
+    if st.session_state.next_clicked:
+        st.divider()
+        
+        # Swapping Sliders for Input Boxes as requested
+        c1, c2 = st.columns(2)
+        with c1:
+            std_dev = st.number_input("Demand Standard Deviation (Volatility)", value=10, min_value=0)
+        with c2:
+            sim_days = st.number_input("Number of Simulation Days", value=10, min_value=1)
+
+        # Generate Demand Data
         np.random.seed(42) 
         daily_demand = np.random.normal(avg_daily_sales, std_dev, sim_days)
         daily_demand = np.clip(daily_demand, 0, None).round(0)
@@ -51,8 +62,7 @@ with tab1:
         st.subheader("📈 Daily Demand Volatility")
         fig_daily = go.Figure()
         fig_daily.add_trace(go.Scatter(
-            x=days, y=daily_demand, 
-            mode='lines+markers', name='Daily Demand',
+            x=days, y=daily_demand, mode='lines+markers', name='Daily Demand',
             line=dict(color='#1f77b4', width=2)
         ))
         fig_daily.add_hline(y=avg_daily_sales, line_dash="dash", line_color="gray", annotation_text="Average")
@@ -60,43 +70,35 @@ with tab1:
         st.plotly_chart(fig_daily, use_container_width=True)
 
         # --- 2. Generated Demand Data Table (Collapsible) ---
-        # Renamed as per Screenshot 2026-05-14 at 5.24.32 PM.png requirements
         with st.expander("📋 Generated Demand Data Table", expanded=False):
             df_summary = pd.DataFrame({
                 "Lead Time Day": days,
                 "Daily Demand (Units)": daily_demand.astype(int),
                 "Cumulative Demand": cumulative_demand.astype(int)
             })
-            # Showing absolute values as per user preference
             st.table(df_summary)
             st.info(f"Total Demand over {sim_days} days: **{cumulative_demand[-1]:.0f} units**")
 
         # --- 3. Cumulative Stress Test Graph ---
         st.subheader("⚖️ Cumulative Stress Test")
         fig_cum = go.Figure()
-        
         fig_cum.add_trace(go.Scatter(
-            x=days, y=cumulative_demand, 
-            mode='lines+markers', name='Actual Total Demand',
+            x=days, y=cumulative_demand, mode='lines+markers', name='Actual Total Demand',
             line=dict(color='#1f77b4', width=3)
         ))
-
         fig_cum.add_trace(go.Scatter(
-            x=days, y=[requisite_inventory] * sim_days, 
-            mode='lines', name='Inventory Limit (Your Strategy)',
+            x=days, y=[requisite_inventory] * sim_days, mode='lines', name='Inventory Limit',
             line=dict(color='#d62728', dash='dash')
         ))
-
         fig_cum.update_layout(template="plotly_white", yaxis_title="Units")
         st.plotly_chart(fig_cum, use_container_width=True)
 
-        # Final Analysis Logic
+        # Final Analysis
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
-            st.error(f"❌ **Stockout!** Your prepared inventory was short by **{total_actual - requisite_inventory:.0f} units**.")
+            st.error(f"❌ **Stockout!** Short by **{total_actual - requisite_inventory:.0f} units**.")
         else:
-            st.success(f"✅ **Safe.** You had a surplus of **{requisite_inventory - total_actual:.0f} units**.")
-
+            st.success(f"✅ **Safe.** Surplus of **{requisite_inventory - total_actual:.0f} units**.")
 
 
 with tab2:
