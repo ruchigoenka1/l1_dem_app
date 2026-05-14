@@ -13,7 +13,8 @@ tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "�
 with tab1:
     st.header("⚖️ The Flaw of Averages Stress Test")
     st.markdown("""
-    **The Goal:** Demonstrate why ordering based strictly on average daily sales creates internal sabotage during the replenishment lead time.
+    **The Scenario:** You calculate your inventory needs based on perfect annual averages. 
+    But customers don't buy in 'averages'—they buy in 'spikes'.
     """)
 
     # --- Setup the Data Inputs ---
@@ -31,17 +32,17 @@ with tab1:
         
         st.metric("Average Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
         st.metric("Requisite Inventory (ADS × Lead Time)", f"{requisite_inventory:.2f}")
-        
-        # Volatility slider to simulate real-world variance
-        volatility = st.slider("Demand Variance (High = More Spiky)", 0.1, 1.5, 0.6)
 
-    st.divider()
+    st.info("💡 Calculation: Based on your average, you need exactly **{:.0f} units** to last until the next shipment.".format(requisite_inventory))
 
     # --- The Trigger Button ---
-    if st.button("Simulate 10-Day Lead Time Demand"):
-        # Simulate demand using a normal distribution
+    if st.button("Run Reality Check (Simulate 10-Day Demand)"):
+        
+        # We define volatility inside the button logic or a sidebar to keep the main view clean
+        # Using a fixed high volatility (e.g., 0.7) to ensure the point is made immediately
+        volatility = 0.7 
+        
         np.random.seed(42) 
-        # Daily demand cannot be negative, so we use clip
         daily_demand = np.random.normal(avg_daily_sales, avg_daily_sales * volatility, lead_time)
         daily_demand = np.clip(daily_demand, 0, None).round(0)
         
@@ -65,12 +66,12 @@ with tab1:
             x=days, 
             y=[requisite_inventory] * lead_time, 
             mode='lines', 
-            name='Stock Based on Average',
+            name='Stock Prepared (Average)',
             line=dict(color='#d62728', dash='dash')
         ))
 
         fig.update_layout(
-            title="Actual Demand vs. Static Average Inventory",
+            title="Why Averages Fail: Actual Demand vs. Prepared Stock",
             xaxis_title="Days in Lead Time",
             yaxis_title="Units",
             template="plotly_white",
@@ -79,15 +80,20 @@ with tab1:
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- Analysis ---
+        # --- Dynamic Analysis ---
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
             stockout_day = np.where(cumulative_demand > requisite_inventory)[0][0] + 1
-            st.error(f"⚠️ **Stockout Detected!** Your inventory ran out on **Day {stockout_day}**.")
-            st.write(f"By the time the truck arrived (Day 10), you were short by **{total_actual - requisite_inventory:.0f} units**.")
+            st.error(f"❌ **Stockout on Day {stockout_day}!**")
+            st.write(f"The 'Average' told you to keep {requisite_inventory:.0f} units. Reality demanded {total_actual:.0f} units.")
         else:
-            st.success(f"✅ **Stock Maintained.** In this specific simulation, the average was enough. (Try increasing variance to see the risk).")
-    
+            st.success(f"✅ **Survived... this time.** But notice how close the demand came to your limit.")
+            
+        # Optional: Show the variance slider only AFTER the first run if you want to let them experiment
+        st.write("---")
+        st.subheader("Adjust Volatility and Re-run")
+        new_vol = st.select_slider("Change Demand Spikiness:", options=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2], value=0.7)
+        st.caption("Lowering this makes the blue line flatter (predictable); raising it makes it spikier (risky).")    
 
 with tab2:
     st.header("Demand Histogram Analyzer")
