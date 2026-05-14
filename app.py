@@ -22,23 +22,21 @@ with tab1:
         lead_time = st.number_input("Lead Time (Days to Replenish)", value=10)
         
     with col2:
-        # Calculate ADS
         avg_daily_sales = annual_sales / working_days
         st.metric("Avg. Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
         
-        # User Strategy Input
         suggested_baseline = avg_daily_sales * lead_time
         requisite_inventory = st.number_input(
             "Enter Requisite Inventory for Lead Time", 
             value=int(suggested_baseline)
         )
 
-    # New Slider for Standard Deviation
-    std_dev = st.slider("Demand Standard Deviation (Volatility)", 0, 50, 10)
-
-    # --- Next Button Logic ---
+    # --- Next Button ---
     if st.button("Next"):
-        # Generate Demand based on ADS and Std Dev
+        # The slider from Screenshot 2026-05-14 at 5.21.54 PM.png appears here
+        std_dev = st.slider("Demand Standard Deviation (Volatility)", 0, 50, 10)
+
+        # Generate Demand
         np.random.seed(42) 
         daily_demand = np.random.normal(avg_daily_sales, std_dev, lead_time)
         daily_demand = np.clip(daily_demand, 0, None).round(0)
@@ -55,21 +53,30 @@ with tab1:
             line=dict(color='#1f77b4', width=2)
         ))
         fig_daily.add_hline(y=avg_daily_sales, line_dash="dash", line_color="gray", annotation_text="Average")
-        fig_daily.update_layout(template="plotly_white", height=300, margin=dict(t=20, b=20))
+        fig_daily.update_layout(template="plotly_white", height=300)
         st.plotly_chart(fig_daily, use_container_width=True)
+
+        # --- Collapsible Data Summary ---
+        with st.expander("📊 View Demand Data Summary", expanded=False):
+            df_summary = pd.DataFrame({
+                "Day": days,
+                "Daily Demand": daily_demand,
+                "Cumulative Demand": cumulative_demand
+            })
+            st.table(df_summary)
+            st.write(f"**Total Lead Time Demand:** {cumulative_demand[-1]:.0f} units")
+            st.write(f"**Inventory Buffer Surplus/Deficit:** {requisite_inventory - cumulative_demand[-1]:.0f} units")
 
         # --- Cumulative Plot (The Stress Test) ---
         st.subheader("⚖️ Cumulative Stress Test")
         fig_cum = go.Figure()
         
-        # Actual Cumulative Demand
         fig_cum.add_trace(go.Scatter(
             x=days, y=cumulative_demand, 
             mode='lines+markers', name='Actual Total Demand',
             line=dict(color='#1f77b4', width=3)
         ))
 
-        # Requisite Inventory Line
         fig_cum.add_trace(go.Scatter(
             x=days, y=[requisite_inventory] * lead_time, 
             mode='lines', name='Your Inventory Limit',
@@ -82,10 +89,9 @@ with tab1:
         # Result Logic
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
-            st.error(f"❌ **Stockout!** Total demand ({total_actual:.0f}) exceeded inventory ({requisite_inventory}).")
+            st.error(f"❌ **Stockout!** Reality outperformed your 'Average' strategy.")
         else:
-            st.success(f"✅ **Safe.** You had {requisite_inventory - total_actual:.0f} units remaining.")
-
+            st.success(f"✅ **Safe.** Your buffer absorbed the volatility.")
 
 
 with tab2:
