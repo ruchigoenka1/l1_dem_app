@@ -68,30 +68,49 @@ with tab1:
             st.metric(f"Demand at {target_perc}% Service Level", f"{int(demand_at_perc)}")
             st.caption(f"To cover {target_perc}% of all periods, you need to satisfy a demand of {int(demand_at_perc)}.")
 
+        # --- 3. Visual Distribution & Tables Below ---
         st.divider()
         st.subheader("3. Visual Distribution")
         
-        # UI matching Screenshot 2026-05-14 at 12.08.41 PM.jpg
         num_bins = st.slider("Select Number of Bins:", 5, 50, 15)
         
-        chart_col, table_col = st.columns([2, 1])
+        # Plot the histogram across the full width
+        fig = px.histogram(df, x="Demand", nbins=num_bins, template="plotly_white", color_discrete_sequence=['#4F8BF9'])
+        fig.update_layout(bargap=0.1, xaxis_title="Demand Quantity", yaxis_title="Count of Periods")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.divider()
+        
+        # Create two side-by-side columns below the chart for the descriptive tables
+        table_col1, table_col2 = st.columns([1, 1])
 
-        with chart_col:
-            fig = px.histogram(df, x="Demand", nbins=num_bins, template="plotly_white", color_discrete_sequence=['#4F8BF9'])
-            fig.update_layout(bargap=0.1, xaxis_title="Demand Quantity", yaxis_title="Count of Periods")
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Data Summary Table
+        with table_col1:
             st.markdown("#### 📋 Statistical Summary")
             summary_stats = df['Demand'].describe().to_frame().T
             st.dataframe(summary_stats[['mean', 'std', 'min', '25%', '50%', '75%', 'max']], use_container_width=True)
 
-        with table_col:
+        with table_col2:
             st.markdown("#### Bin Frequency Table")
             counts, bin_edges = np.histogram(df['Demand'], bins=num_bins)
+            
+            # Calculate baseline percentage distribution
+            pct_total = counts / len(df) * 100
+            
+            # Formulate the final dataframe including Cumulative Count and Cumulative Percent
             bin_df = pd.DataFrame({
                 "Bin Range": [f"{int(bin_edges[i])} - {int(bin_edges[i+1])}" for i in range(len(bin_edges)-1)],
                 "Frequency (Count)": counts,
-                "% of Total": (counts / len(df) * 100).round(1)
+                "% of Total": pct_total.round(1),
+                "Cum. Count": counts.cumsum(),
+                "Cum. %": pct_total.cumsum().round(1)
             })
             st.dataframe(bin_df, use_container_width=True, hide_index=True)
+
+# Placeholder layouts for future tabs
+with tab2:
+    st.header("Demand Forecasting Analytics")
+    st.info("Forecasting models can be plugged in here.")
+
+with tab3:
+    st.header("Inventory Optimization Insights")
+    st.info("Safety stock and reorder point metrics can be implemented here.")
