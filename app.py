@@ -61,13 +61,13 @@ with tab1:
         with c3:
             rolling_window = st.number_input("Look-Forward Window (Days)", value=10, min_value=1, max_value=int(sim_days))
 
-        # Action Buttons Layout: Regenerate Button Added Here
+        # Action Buttons Layout: Regenerate Button
         btn_col1, btn_col2 = st.columns([1, 5])
         with btn_col1:
             if st.button("🔄 Regenerate Demand"):
                 st.session_state.seed_counter += 1  # Shifts the seed to force a new layout run
 
-        # Generate Volatile Demand Data Array using our tracked state seed
+        # Generate Volatile Demand Data Array
         np.random.seed(st.session_state.seed_counter)
         daily_demand = np.random.normal(avg_daily_sales, std_dev, sim_days)
         daily_demand = np.clip(daily_demand, 0, None).round(0)  # Prevents impossible negative demand days
@@ -102,18 +102,32 @@ with tab1:
         deficits_series = valid_forward_days > requisite_inventory
         total_deficits = deficits_series.sum()
         pct_deficits = (total_deficits / total_valid_days * 100) if total_valid_days > 0 else 0.0
+        
+        # Calculate Maximum Forward Window Value
+        max_window_demand = valid_forward_days.max() if total_valid_days > 0 else 0.0
 
         # --- Visual Asset 2: Collapsible Diagnostic Data Table & Scorecard ---
         with st.expander("📋 Generated Demand Data Table", expanded=False):
             st.markdown("### 📊 Window Analysis Summary")
-            m1, m2, m3 = st.columns(3)
+            
+            # Expanded layout matrix (changed to 4 columns to fit the new metric)
+            m1, m2, m3, m4 = st.columns(4)
             with m1:
                 st.metric("Total Days with Valid Window", f"{total_valid_days} Days")
             with m2:
+                # Calculate absolute peak gap to show if the strategy safely absorbed it
+                peak_gap = int(max_window_demand - requisite_inventory)
+                st.metric(
+                    "Max Window Demand Peak", 
+                    f"{int(max_window_demand)} Units",
+                    delta=f"+{peak_gap} Over Limit" if peak_gap > 0 else f"{peak_gap} Under Limit",
+                    delta_color="inverse" if peak_gap > 0 else "normal"
+                )
+            with m3:
                 st.metric("Total Deficit Occurrences", f"{total_deficits} Days", 
                           delta=f"-{total_deficits} Stockouts" if total_deficits > 0 else None, 
                           delta_color="inverse" if total_deficits > 0 else "normal")
-            with m3:
+            with m4:
                 st.metric("Deficit Risk Rate (%)", f"{pct_deficits:.1f}%",
                           delta="CRITICAL RISK" if pct_deficits > 30 else "STABLE BUFFER",
                           delta_color="inverse" if pct_deficits > 30 else "normal")
@@ -206,7 +220,9 @@ with tab1:
             st.error(f"❌ **Internal Sabotage Confirmed:** Volatility breached your static 'Average' allocation baseline strategy on **{total_deficits} separate window cycles** ({pct_deficits:.1f}% risk rate).")
         else:
             st.success(f"✅ **Strategic Parameter Verified.** Under these isolated settings, the current allocation buffer safely absorbed the simulated variance across all window blocks.")
-            
+
+
+
 with tab2:
     st.header("Demand Histogram Analyzer")
     
