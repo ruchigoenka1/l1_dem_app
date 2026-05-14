@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import io
 
 st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
@@ -40,10 +41,53 @@ with tab1:
         elif dist_type == "Poisson":
             generated = np.random.poisson(avg_demand, num_periods)
         else:
-            # FIX: Ensure strictly within max limit by avoiding rounding up
             generated = np.random.uniform(avg_demand - variation, avg_demand + variation, num_periods)
         
         df = pd.DataFrame({'Demand': np.floor(np.clip(generated, 0, None))})
+
+    elif data_source == "Upload Your Own Data":
+        up_col1, up_col2 = st.columns([2, 1])
+        
+        with up_col1:
+            uploaded_file = st.file_uploader("Upload your historical demand file (.xlsx or .csv):", type=["xlsx", "csv"])
+            if uploaded_file is not None:
+                try:
+                    if uploaded_file.name.endswith('.csv'):
+                        df_upload = pd.read_csv(uploaded_file)
+                    else:
+                        df_upload = pd.read_excel(uploaded_file)
+                    
+                    # Validation Check: Ensure 'Demand' column exists
+                    if 'Demand' in df_upload.columns:
+                        # Clean data: drop missing values and ensure numerical types
+                        df = df_upload[['Demand']].dropna().copy()
+                        df['Demand'] = pd.to_numeric(df['Demand'], errors='coerce')
+                        df = df.dropna()
+                        st.success("✅ File successfully uploaded and parsed!")
+                    else:
+                        st.error("❌ Invalid Format: Your file must contain a column named exactly **'Demand'**.")
+                except Exception as e:
+                    st.error(f"❌ Error loading file: {e}")
+                    
+        with up_col2:
+            st.markdown("#### 📋 Download Template")
+            st.caption("Please match your data format to this template. The sheet must include a column header named **Demand**.")
+            
+            # Constructing a sample template dataframe on the fly
+            template_df = pd.DataFrame({'Demand': [120, 95, 110, 135, 80, 105, 115]})
+            
+            # Creating Excel file stream using BytesIO
+            buffer = io.BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Template')
+            
+            st.download_button(
+                label="📥 Download Excel Template",
+                data=buffer.getvalue(),
+                file_name="demand_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
     # --- Collapsible Raw Data Table ---
     if df is not None:
@@ -55,8 +99,8 @@ with tab1:
             with exp_col1:
                 st.dataframe(raw_display_df, use_container_width=True, height=250)
             with exp_col2:
-                st.markdown("#### Export Data")
-                st.caption("Download this exact dataset as a CSV file for offline use.")
+                st.markdown("#### Export Current Data")
+                st.caption("Download this active dataset as a CSV file for offline use.")
                 csv_data = raw_display_df.to_csv(index=True).encode('utf-8')
                 st.download_button(
                     label="📥 Download CSV",
@@ -84,7 +128,6 @@ with tab1:
         with analysis_col2:
             st.markdown("#### Percentile Lookup (Coverage Level)")
             target_perc = st.number_input("Enter Service Level % (e.g. 95):", min_value=0.0, max_value=100.0, value=95.0, step=1.0)
-            # Calculate the value at the given percentile
             demand_at_perc = np.percentile(df['Demand'], target_perc)
             st.metric(f"Demand at {target_perc}% Service Level", f"{int(demand_at_perc)}")
             st.caption(f"To cover {target_perc}% of all periods, you need to satisfy a demand of {int(demand_at_perc)}.")
@@ -95,14 +138,11 @@ with tab1:
         
         num_bins = st.slider("Select Number of Bins:", 5, 50, 15)
         
-        # Calculate strict math-based bin ranges using NumPy first
         counts, bin_edges = np.histogram(df['Demand'], bins=num_bins)
-        bin_size = bin_edges[1] - bin_edges[0]  # Width of exactly 1 bin
+        bin_size = bin_edges[1] - bin_edges[0] if len(bin_edges) > 1 else 1
 
-        # Plot the base histogram
         fig = px.histogram(df, x="Demand", template="plotly_white", color_discrete_sequence=['#4F8BF9'])
         
-        # FORCE Plotly to match NumPy's calculated bin structure exactly
         fig.update_traces(
             xbins=dict(
                 start=bin_edges[0],
@@ -111,7 +151,6 @@ with tab1:
             )
         )
         
-        # Reference lines based on Section 2 inputs
         fig.add_vline(
             x=threshold, 
             line_dash="dot", 
@@ -135,7 +174,6 @@ with tab1:
         
         st.divider()
         
-        # Side-by-side analytical tables
         table_col1, table_col2 = st.columns([1, 1])
 
         with table_col1:
@@ -145,7 +183,6 @@ with tab1:
 
         with table_col2:
             st.markdown("#### Bin Frequency Table")
-            # Baseline percentage distribution using the same counts calculated above
             pct_total = counts / len(df) * 100
             
             bin_df = pd.DataFrame({
