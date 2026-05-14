@@ -50,12 +50,12 @@ with tab1:
         st.divider()
         st.subheader("🎯 Stress Test Parameters & Reality Simulator")
         
-        # User Parameter Input Boxes (Avoids slider click state wipeouts)
+        # User Parameter Input Boxes
         c1, c2, c3 = st.columns(3)
         with c1:
             std_dev = st.number_input("Demand Standard Deviation (Volatility)", value=10, min_value=0)
         with c2:
-            sim_days = st.number_input("Number of Simulation Days", value=20, min_value=1)
+            sim_days = st.number_input("Number of Simulation Days", value=100, min_value=1)
         with c3:
             rolling_window = st.number_input("Look-Forward Window (Days)", value=10, min_value=1, max_value=int(sim_days))
 
@@ -64,7 +64,6 @@ with tab1:
         daily_demand = np.random.normal(avg_daily_sales, std_dev, sim_days)
         daily_demand = np.clip(daily_demand, 0, None).round(0)  # Prevents impossible negative demand days
         
-        cumulative_demand = np.cumsum(daily_demand)
         days = [f"Day {i+1}" for i in range(sim_days)]
         
         # --- Visual Asset 1: Daily Demand Timeline ---
@@ -78,32 +77,26 @@ with tab1:
         fig_daily.update_layout(template="plotly_white", height=300, margin=dict(t=10, b=10))
         st.plotly_chart(fig_daily, use_container_width=True)
 
+        # Pre-calculating Data for Tables & Charts
+        df_summary = pd.DataFrame({
+            "Lead Time Day": days,
+            "Daily Demand (Units)": daily_demand.astype(int)
+        })
+        
+        # Look-Forward Core Mathematical Optimization Matrix
+        forward_sums = df_summary["Daily Demand (Units)"].iloc[::-1].rolling(window=rolling_window).sum().iloc[::-1]
+        df_summary[f"Demand Next {rolling_window} Days"] = forward_sums
+        df_summary["Inventory Level Provided"] = int(requisite_inventory)
+        
+        # Metric Scorecard Data Compilation
+        valid_forward_days = forward_sums.dropna()
+        total_valid_days = len(valid_forward_days)
+        deficits_series = valid_forward_days > requisite_inventory
+        total_deficits = deficits_series.sum()
+        pct_deficits = (total_deficits / total_valid_days * 100) if total_valid_days > 0 else 0.0
+
         # --- Visual Asset 2: Collapsible Diagnostic Data Table & Scorecard ---
         with st.expander("📋 Generated Demand Data Table", expanded=False):
-            
-            # Formulating the primary analysis DataFrame
-            df_summary = pd.DataFrame({
-                "Lead Time Day": days,
-                "Daily Demand (Units)": daily_demand.astype(int),
-                "Cumulative Demand": cumulative_demand.astype(int)
-            })
-            
-            # Look-Forward Core Mathematical Optimization Matrix
-            # Reverses data vector -> applies standard lookback rolling window -> reverses vector back to chronological order
-            forward_sums = df_summary["Daily Demand (Units)"].iloc[::-1].rolling(window=rolling_window).sum().iloc[::-1]
-            df_summary[f"Demand Next {rolling_window} Days"] = forward_sums
-            
-            # Map the user strategy metric into the comparison matrix
-            df_summary["Inventory Level Provided"] = int(requisite_inventory)
-            
-            # Metric Scorecard Data Compilation
-            valid_forward_days = forward_sums.dropna()
-            total_valid_days = len(valid_forward_days)
-            deficits_series = valid_forward_days > requisite_inventory
-            total_deficits = deficits_series.sum()
-            pct_deficits = (total_deficits / total_valid_days * 100) if total_valid_days > 0 else 0.0
-
-            # Display Matrix Scorecard
             st.markdown("### 📊 Window Analysis Summary")
             m1, m2, m3 = st.columns(3)
             with m1:
@@ -123,7 +116,7 @@ with tab1:
             def calculate_status(row):
                 forward_demand = row[f"Demand Next {rolling_window} Days"]
                 if pd.isna(forward_demand):
-                    return ""  # Leaves trailing cell clean if full window bounds are unachievable
+                    return ""
                 
                 net_value = int(row["Inventory Level Provided"] - forward_demand)
                 if net_value >= 0:
@@ -131,38 +124,87 @@ with tab1:
                 else:
                     return f'<span style="color: #d32f2f; font-weight: bold;">🔴 Deficit ({net_value})</span>'
 
-            # Build and finalize the presentation layer of the table
-            df_summary["Net Status"] = df_summary.apply(calculate_status, axis=1)
-            df_summary[f"Demand Next {rolling_window} Days"] = df_summary[f"Demand Next {rolling_window} Days"].apply(
+            # Build and finalize table display dataframe
+            df_table = df_summary.copy()
+            df_table["Net Status"] = df_table.apply(calculate_status, axis=1)
+            df_table[f"Demand Next {rolling_window} Days"] = df_table[f"Demand Next {rolling_window} Days"].apply(
                 lambda x: f"{int(x)}" if not pd.isna(x) else ""
             )
             
-            # Render out raw dataframe directly to localized HTML block to allow safe rendering of styling elements
-            st.write(df_summary.to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.write(df_table.to_html(escape=False, index=False), unsafe_allow_html=True)
             st.write("<br>", unsafe_allow_html=True)
-            st.info(f"Total Simulation Demand over {sim_days} day run: **{cumulative_demand[-1]:.0f} units**")
 
-        # --- Visual Asset 3: Cumulative Stress Test Visualization ---
-        st.write("### ⚖️ Cumulative Stress Test")
-        fig_cum = go.Figure()
-        fig_cum.add_trace(go.Scatter(
-            x=days, y=cumulative_demand, mode='lines+markers', name='Actual Accumulated Demand',
-            line=dict(color='#1f77b4', width=3)
-        ))
-        fig_cum.add_trace(go.Scatter(
-            x=days, y=[requisite_inventory] * sim_days, mode='lines', name='Your Strategy Target Bound',
-            line=dict(color='#d62728', dash='dash')
-        ))
-        fig_cum.update_layout(template="plotly_white", yaxis_title="Accumulative Units", height=350)
-        st.plotly_chart(fig_cum, use_container_width=True)
+        # --- Visual Asset 3: NEW Collapsible Charts for Forward Window Analytics ---
+        with st.expander("📊 View Forward Window Trend & Distribution Analysis", expanded=False):
+            # Isolate clean data pairs that contain actual window metrics
+            df_clean_charts = df_summary.dropna().copy()
+            
+            graph_col1, graph_col2 = st.columns(2)
+            
+            with graph_col1:
+                st.markdown(f"#### 📉 Forward Window Demand Trend")
+                fig_trend = go.Figure()
+                
+                # Plot forward window demand values
+                fig_trend.add_trace(go.Scatter(
+                    x=df_clean_charts["Lead Time Day"], 
+                    y=df_clean_charts[f"Demand Next {rolling_window} Days"],
+                    mode='lines',
+                    name=f'{rolling_window}-Day Demand',
+                    line=dict(color='#1f77b4', width=2)
+                ))
+                # Horizontal target safety threshold ceiling line
+                fig_trend.add_hline(
+                    y=requisite_inventory, 
+                    line_dash="dash", 
+                    line_color="#d62728", 
+                    annotation_text="Your Stock Limit",
+                    annotation_position="top left"
+                )
+                fig_trend.update_layout(
+                    template="plotly_white", 
+                    xaxis_title="Simulation Day Index",
+                    yaxis_title="Total Window Units",
+                    height=350,
+                    margin=dict(t=30, b=10)
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
+                
+            with graph_col2:
+                st.markdown(f"#### 📊 Look-Forward Window Distribution")
+                
+                # Determine colors based on whether bins sit above or below the stock threshold limit
+                fig_hist = px.histogram(
+                    df_clean_charts, 
+                    x=f"Demand Next {rolling_window} Days",
+                    nbins=20,
+                    color_discrete_sequence=['#1f77b4']
+                )
+                # Vertical line marker indicating where capacity runs out
+                fig_hist.add_vline(
+                    x=requisite_inventory, 
+                    line_dash="dash", 
+                    line_color="#d62728", 
+                    annotation_text="Stock Ceiling",
+                    annotation_position="top right"
+                )
+                fig_hist.update_layout(
+                    template="plotly_white",
+                    xaxis_title=f"Aggregated Demand in {rolling_window}-Day Windows",
+                    yaxis_title="Frequency Occurrence Count",
+                    height=350,
+                    margin=dict(t=30, b=10),
+                    showlegend=False
+                )
+                st.plotly_chart(fig_hist, use_container_width=True)
 
         # Final Summary Executive Alerts
-        total_actual = cumulative_demand[-1]
-        if total_actual > requisite_inventory:
-            st.error(f"❌ **Operational Stockout Identified!** The actual aggregate demand outpaced your static allocation buffer strategy thresholds.")
+        if total_deficits > 0:
+            st.error(f"❌ **Internal Sabotage Confirmed:** Volatility breached your static 'Average' allocation baseline strategy on **{total_deficits} separate window cycles** ({pct_deficits:.1f}% risk rate).")
         else:
-            st.success(f"✅ **Strategic Parameter Verified.** Under these isolated settings, the current allocation buffer safely absorbed the simulated volatility.")
+            st.success(f"✅ **Buffer Sufficient:** Your chosen inventory strategy target
 
+            
 with tab2:
     st.header("Demand Histogram Analyzer")
     
