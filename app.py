@@ -95,11 +95,23 @@ with tab1:
         
         num_bins = st.slider("Select Number of Bins:", 5, 50, 15)
         
+        # Calculate strict math-based bin ranges using NumPy first
+        counts, bin_edges = np.histogram(df['Demand'], bins=num_bins)
+        bin_size = bin_edges[1] - bin_edges[0]  # Width of exactly 1 bin
+
         # Plot the base histogram
-        fig = px.histogram(df, x="Demand", nbins=num_bins, template="plotly_white", color_discrete_sequence=['#4F8BF9'])
+        fig = px.histogram(df, x="Demand", template="plotly_white", color_discrete_sequence=['#4F8BF9'])
         
-        # Dynamic Additions: Reference lines based on Section 2 inputs
-        # 1. Red Dotted Line for Threshold Value
+        # FORCE Plotly to match NumPy's calculated bin structure exactly
+        fig.update_traces(
+            xbins=dict(
+                start=bin_edges[0],
+                end=bin_edges[-1],
+                size=bin_size
+            )
+        )
+        
+        # Reference lines based on Section 2 inputs
         fig.add_vline(
             x=threshold, 
             line_dash="dot", 
@@ -109,7 +121,6 @@ with tab1:
             annotation_position="top left"
         )
         
-        # 2. Green Dotted Line for Service Level Percentile
         fig.add_vline(
             x=demand_at_perc, 
             line_dash="dot", 
@@ -134,8 +145,7 @@ with tab1:
 
         with table_col2:
             st.markdown("#### Bin Frequency Table")
-            counts, bin_edges = np.histogram(df['Demand'], bins=num_bins)
-            
+            # Baseline percentage distribution using the same counts calculated above
             pct_total = counts / len(df) * 100
             
             bin_df = pd.DataFrame({
