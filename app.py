@@ -22,11 +22,9 @@ with tab1:
         lead_time = st.number_input("Lead Time (Days to Replenish)", value=10)
         
     with col2:
-        # Calculate Average Daily Sales (ADS)
         avg_daily_sales = annual_sales / working_days
         st.metric("Avg. Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
         
-        # Strategy Input: Requisite Inventory
         suggested_baseline = avg_daily_sales * lead_time
         requisite_inventory = st.number_input(
             "Enter Requisite Inventory for Lead Time", 
@@ -35,7 +33,7 @@ with tab1:
 
     # --- Next Button Logic ---
     if st.button("Next"):
-        # Demand Volatility Slider (revealed after clicking Next)
+        # Reveals the Volatility Slider
         std_dev = st.slider("Demand Standard Deviation (Volatility)", 0, 50, 10)
 
         # Generate Demand Data
@@ -52,7 +50,7 @@ with tab1:
         fig_daily.add_trace(go.Scatter(
             x=days, y=daily_demand, 
             mode='lines+markers', name='Daily Demand',
-            line=dict(color='#1f77b4', width=2) # Professional Blue
+            line=dict(color='#1f77b4', width=2)
         ))
         fig_daily.add_hline(y=avg_daily_sales, line_dash="dash", line_color="gray", annotation_text="Average")
         fig_daily.update_layout(template="plotly_white", height=350)
@@ -65,10 +63,8 @@ with tab1:
                 "Daily Demand (Units)": daily_demand.astype(int),
                 "Cumulative Demand": cumulative_demand.astype(int)
             })
-            # Display as a table with absolute values
-            st.table(df_summary)
-            
-            st.info(f"Total Demand over Lead Time: **{cumulative_demand[-1]:.0f} units**")
+            st.table(df_summary) # Displaying absolute values as requested
+            st.info(f"Total Lead Time Demand: **{cumulative_demand[-1]:.0f} units**")
 
         # --- 3. Cumulative Stress Test Graph ---
         st.subheader("⚖️ Cumulative Stress Test")
@@ -89,13 +85,12 @@ with tab1:
         fig_cum.update_layout(template="plotly_white", yaxis_title="Units")
         st.plotly_chart(fig_cum, use_container_width=True)
 
-        # Result Messaging
+        # Final Diagnostics
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
-            st.error(f"❌ **Internal Sabotage Detected:** Your average-based strategy failed. You are short by **{total_actual - requisite_inventory:.0f} units**.")
+            st.error(f"❌ **Stockout!** Your inventory level was insufficient to cover the volatility.")
         else:
-            st.success(f"✅ **Buffer Sufficient:** Your chosen inventory level absorbed the volatility.")
-
+            st.success(f"✅ **Safe.** Your strategy successfully covered the demand spikes.")
 
 with tab2:
     st.header("Demand Histogram Analyzer")
