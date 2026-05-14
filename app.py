@@ -48,9 +48,8 @@ with tab1:
         with c1:
             std_dev = st.number_input("Demand Standard Deviation (Volatility)", value=10, min_value=0)
         with c2:
-            sim_days = st.number_input("Number of Simulation Days", value=20, min_value=1, help="Increase this (e.g., to 20 or 30) to see how the look-forward window behaves.")
+            sim_days = st.number_input("Number of Simulation Days", value=20, min_value=1)
         with c3:
-            # Look-forward window input (default to 10 days)
             rolling_window = st.number_input("Look-Forward Window (Days)", value=10, min_value=1, max_value=int(sim_days))
 
         # Generate Demand Data
@@ -72,7 +71,7 @@ with tab1:
         fig_daily.update_layout(template="plotly_white", height=350)
         st.plotly_chart(fig_daily, use_container_width=True)
 
-        # --- 2. Generated Demand Data Table (Collapsible with Look-Forward Metric) ---
+        # --- 2. Generated Demand Data Table (Collapsible with HTML Color Mapping) ---
         with st.expander("📋 Generated Demand Data Table", expanded=False):
             
             # Base DataFrame creation
@@ -82,18 +81,38 @@ with tab1:
                 "Cumulative Demand": cumulative_demand.astype(int)
             })
             
-            # MATH HACK: Forward-looking rolling window via string slicing & reversal
-            # step 1: reverse array -> step 2: rolling sum -> step 3: reverse back
+            # Forward-looking rolling window calculation
             forward_sums = df_summary["Daily Demand (Units)"].iloc[::-1].rolling(window=rolling_window).sum().iloc[::-1]
-            
-            # Convert to object type so we can inject empty strings cleanly without pandas forcing NaN decimals
             df_summary[f"Demand Next {rolling_window} Days"] = forward_sums
+            
+            # Add User Input Inventory Level Column
+            df_summary["Inventory Level Provided"] = int(requisite_inventory)
+            
+            # Function to calculate surplus/deficit and inject clean HTML colors
+            def calculate_status(row):
+                forward_demand = row[f"Demand Next {rolling_window} Days"]
+                # Leave blank if outside the look-forward window threshold
+                if pd.isna(forward_demand):
+                    return ""
+                
+                net_value = int(row["Inventory Level Provided"] - forward_demand)
+                if net_value >= 0:
+                    return f'<span style="color: #2e7d32; font-weight: bold;">🟢 Surplus (+{net_value})</span>'
+                else:
+                    return f'<span style="color: #d32f2f; font-weight: bold;">🔴 Deficit ({net_value})</span>'
+
+            # Apply status mapping row-by-row
+            df_summary["Net Status"] = df_summary.apply(calculate_status, axis=1)
+            
+            # Clean up the demand lookup display column so it doesn't show NaN floating points
             df_summary[f"Demand Next {rolling_window} Days"] = df_summary[f"Demand Next {rolling_window} Days"].apply(
                 lambda x: f"{int(x)}" if not pd.isna(x) else ""
             )
             
-            # Displaying absolute values in table form
-            st.table(df_summary)
+            # Render dataframe natively as an HTML table to display colors safely
+            st.write(df_summary.to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.write("<br>", unsafe_allow_html=True) # Spacer
+            
             st.info(f"Total Demand over {sim_days} days: **{cumulative_demand[-1]:.0f} units**")
 
         # --- 3. Cumulative Stress Test Graph ---
@@ -116,8 +135,6 @@ with tab1:
             st.error(f"❌ **Stockout Risk!** Total accumulated demand outstripped your fixed strategy threshold.")
         else:
             st.success(f"✅ **Safe Range.** The current parameter limits safely contain simulated demand variance.")
-
-
 
 with tab2:
     st.header("Demand Histogram Analyzer")
