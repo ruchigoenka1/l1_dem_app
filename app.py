@@ -45,14 +45,12 @@ with tab1:
         
         df = pd.DataFrame({'Demand': np.floor(np.clip(generated, 0, None))})
 
-    # --- Collapsible Raw Data Table (Right after Configuration) ---
+    # --- Collapsible Raw Data Table ---
     if df is not None:
         with st.expander("🔢 View / Download Raw Data Table", expanded=False):
-            # Prep dataframe with a 'Period' index label
             raw_display_df = df.copy()
             raw_display_df.index.name = "Period"
             
-            # Setup columns inside the expander to split table and download button
             exp_col1, exp_col2 = st.columns([3, 1])
             with exp_col1:
                 st.dataframe(raw_display_df, use_container_width=True, height=250)
@@ -97,14 +95,36 @@ with tab1:
         
         num_bins = st.slider("Select Number of Bins:", 5, 50, 15)
         
-        # Plot the histogram across the full width
+        # Plot the base histogram
         fig = px.histogram(df, x="Demand", nbins=num_bins, template="plotly_white", color_discrete_sequence=['#4F8BF9'])
+        
+        # Dynamic Additions: Reference lines based on Section 2 inputs
+        # 1. Red Dotted Line for Threshold Value
+        fig.add_vline(
+            x=threshold, 
+            line_dash="dot", 
+            line_color="#EF553B", 
+            line_width=2.5,
+            annotation_text=f"Threshold ({threshold})", 
+            annotation_position="top left"
+        )
+        
+        # 2. Green Dotted Line for Service Level Percentile
+        fig.add_vline(
+            x=demand_at_perc, 
+            line_dash="dot", 
+            line_color="#00CC96", 
+            line_width=2.5,
+            annotation_text=f"{target_perc}% Service Level ({int(demand_at_perc)})", 
+            annotation_position="top right"
+        )
+        
         fig.update_layout(bargap=0.1, xaxis_title="Demand Quantity", yaxis_title="Count of Periods")
         st.plotly_chart(fig, use_container_width=True)
         
         st.divider()
         
-        # Two side-by-side columns under the chart
+        # Side-by-side analytical tables
         table_col1, table_col2 = st.columns([1, 1])
 
         with table_col1:
@@ -116,10 +136,8 @@ with tab1:
             st.markdown("#### Bin Frequency Table")
             counts, bin_edges = np.histogram(df['Demand'], bins=num_bins)
             
-            # Calculate baseline percentage distribution
             pct_total = counts / len(df) * 100
             
-            # Formulate the final dataframe including Cumulative Count and Cumulative Percent
             bin_df = pd.DataFrame({
                 "Bin Range": [f"{int(bin_edges[i])} - {int(bin_edges[i+1])}" for i in range(len(bin_edges)-1)],
                 "Frequency (Count)": counts,
