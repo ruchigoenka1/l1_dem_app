@@ -43,15 +43,15 @@ with tab1:
     if st.session_state.next_clicked:
         st.divider()
         
-        # User Parameter Inputs (Using number boxes to avoid state wipe)
+        # User Parameter Inputs
         c1, c2, c3 = st.columns(3)
         with c1:
             std_dev = st.number_input("Demand Standard Deviation (Volatility)", value=10, min_value=0)
         with c2:
-            sim_days = st.number_input("Number of Simulation Days", value=10, min_value=1)
+            sim_days = st.number_input("Number of Simulation Days", value=20, min_value=1, help="Increase this (e.g., to 20 or 30) to see how the look-forward window behaves.")
         with c3:
-            # New Rolling Window Input Box
-            rolling_window = st.number_input("Rolling Window (Days)", value=3, min_value=1, max_value=int(sim_days))
+            # Look-forward window input (default to 10 days)
+            rolling_window = st.number_input("Look-Forward Window (Days)", value=10, min_value=1, max_value=int(sim_days))
 
         # Generate Demand Data
         np.random.seed(42) 
@@ -72,19 +72,24 @@ with tab1:
         fig_daily.update_layout(template="plotly_white", height=350)
         st.plotly_chart(fig_daily, use_container_width=True)
 
-        # --- 2. Generated Demand Data Table (Collapsible with Rolling Metric) ---
+        # --- 2. Generated Demand Data Table (Collapsible with Look-Forward Metric) ---
         with st.expander("📋 Generated Demand Data Table", expanded=False):
-            # Formulating the DataFrame
+            
+            # Base DataFrame creation
             df_summary = pd.DataFrame({
                 "Lead Time Day": days,
                 "Daily Demand (Units)": daily_demand.astype(int),
                 "Cumulative Demand": cumulative_demand.astype(int)
             })
             
-            # Calculating Rolling Demand Sum based on user window input
-            # min_periods=1 ensures we get data even for early days before the window size is met
-            df_summary[f"Rolling {rolling_window}-Day Total"] = (
-                df_summary["Daily Demand (Units)"].rolling(window=rolling_window, min_periods=1).sum().astype(int)
+            # MATH HACK: Forward-looking rolling window via string slicing & reversal
+            # step 1: reverse array -> step 2: rolling sum -> step 3: reverse back
+            forward_sums = df_summary["Daily Demand (Units)"].iloc[::-1].rolling(window=rolling_window).sum().iloc[::-1]
+            
+            # Convert to object type so we can inject empty strings cleanly without pandas forcing NaN decimals
+            df_summary[f"Demand Next {rolling_window} Days"] = forward_sums
+            df_summary[f"Demand Next {rolling_window} Days"] = df_summary[f"Demand Next {rolling_window} Days"].apply(
+                lambda x: f"{int(x)}" if not pd.isna(x) else ""
             )
             
             # Displaying absolute values in table form
@@ -108,9 +113,12 @@ with tab1:
         # Final Analysis
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
-            st.error(f"❌ **Stockout!** Short by **{total_actual - requisite_inventory:.0f} units**.")
+            st.error(f"❌ **Stockout Risk!** Total accumulated demand outstripped your fixed strategy threshold.")
         else:
-            st.success(f"✅ **Safe.** Surplus of **{requisite_inventory - total_actual:.0f} units**.")
+            st.success(f"✅ **Safe Range.** The current parameter limits safely contain simulated demand variance.")
+
+
+
 with tab2:
     st.header("Demand Histogram Analyzer")
     
