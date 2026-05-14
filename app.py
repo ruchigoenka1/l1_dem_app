@@ -43,7 +43,6 @@ with tab1:
     if st.session_state.next_clicked:
         st.divider()
         
-        # Swapping Sliders for Input Boxes as requested
         c1, c2 = st.columns(2)
         with c1:
             std_dev = st.number_input("Demand Standard Deviation (Volatility)", value=10, min_value=0)
@@ -66,7 +65,17 @@ with tab1:
             line=dict(color='#1f77b4', width=2)
         ))
         fig_daily.add_hline(y=avg_daily_sales, line_dash="dash", line_color="gray", annotation_text="Average")
-        fig_daily.update_layout(template="plotly_white", height=350)
+        
+        # FIX: Forcing horizontal text and clean label spacing
+        fig_daily.update_layout(
+            template="plotly_white", 
+            height=350,
+            xaxis=dict(
+                tickangle=0,          # Forces text to stay completely horizontal
+                nticks=15,            # Automatically limits the maximum number of labels shown
+                tickmode='auto'       # Let Plotly clean up crowded axes automatically
+            )
+        )
         st.plotly_chart(fig_daily, use_container_width=True)
 
         # --- 2. Generated Demand Data Table (Collapsible) ---
@@ -90,7 +99,17 @@ with tab1:
             x=days, y=[requisite_inventory] * sim_days, mode='lines', name='Inventory Limit',
             line=dict(color='#d62728', dash='dash')
         ))
-        fig_cum.update_layout(template="plotly_white", yaxis_title="Units")
+        
+        # FIX: Applying same x-axis clean up here
+        fig_cum.update_layout(
+            template="plotly_white", 
+            yaxis_title="Units",
+            xaxis=dict(
+                tickangle=0,
+                nticks=15,
+                tickmode='auto'
+            )
+        )
         st.plotly_chart(fig_cum, use_container_width=True)
 
         # Final Analysis
@@ -99,7 +118,6 @@ with tab1:
             st.error(f"❌ **Stockout!** Short by **{total_actual - requisite_inventory:.0f} units**.")
         else:
             st.success(f"✅ **Safe.** Surplus of **{requisite_inventory - total_actual:.0f} units**.")
-
 
 with tab2:
     st.header("Demand Histogram Analyzer")
