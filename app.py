@@ -122,7 +122,7 @@ with tab1:
             threshold = st.number_input("Enter Demand Value:", value=40.0, step=1.0)
             count_below = len(df[df['Demand'] < threshold])
             percent_below = (count_below / len(df)) * 100
-            st.metric(f"Probability of Demand < {threshold}", f"{percent_below:.1f}%")
+            st.metric(f"Chances of Demand < {threshold}", f"{percent_below:.1f}%")
             st.caption(f"There are {count_below} periods where demand was less than {threshold}.")
 
         with analysis_col2:
