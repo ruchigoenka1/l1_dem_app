@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import io
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
