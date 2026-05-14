@@ -43,11 +43,15 @@ with tab1:
     if st.session_state.next_clicked:
         st.divider()
         
-        c1, c2 = st.columns(2)
+        # User Parameter Inputs (Using number boxes to avoid state wipe)
+        c1, c2, c3 = st.columns(3)
         with c1:
             std_dev = st.number_input("Demand Standard Deviation (Volatility)", value=10, min_value=0)
         with c2:
             sim_days = st.number_input("Number of Simulation Days", value=10, min_value=1)
+        with c3:
+            # New Rolling Window Input Box
+            rolling_window = st.number_input("Rolling Window (Days)", value=3, min_value=1, max_value=int(sim_days))
 
         # Generate Demand Data
         np.random.seed(42) 
@@ -65,26 +69,25 @@ with tab1:
             line=dict(color='#1f77b4', width=2)
         ))
         fig_daily.add_hline(y=avg_daily_sales, line_dash="dash", line_color="gray", annotation_text="Average")
-        
-        # FIX: Forcing horizontal text and clean label spacing
-        fig_daily.update_layout(
-            template="plotly_white", 
-            height=350,
-            xaxis=dict(
-                tickangle=0,          # Forces text to stay completely horizontal
-                nticks=15,            # Automatically limits the maximum number of labels shown
-                tickmode='auto'       # Let Plotly clean up crowded axes automatically
-            )
-        )
+        fig_daily.update_layout(template="plotly_white", height=350)
         st.plotly_chart(fig_daily, use_container_width=True)
 
-        # --- 2. Generated Demand Data Table (Collapsible) ---
+        # --- 2. Generated Demand Data Table (Collapsible with Rolling Metric) ---
         with st.expander("📋 Generated Demand Data Table", expanded=False):
+            # Formulating the DataFrame
             df_summary = pd.DataFrame({
                 "Lead Time Day": days,
                 "Daily Demand (Units)": daily_demand.astype(int),
                 "Cumulative Demand": cumulative_demand.astype(int)
             })
+            
+            # Calculating Rolling Demand Sum based on user window input
+            # min_periods=1 ensures we get data even for early days before the window size is met
+            df_summary[f"Rolling {rolling_window}-Day Total"] = (
+                df_summary["Daily Demand (Units)"].rolling(window=rolling_window, min_periods=1).sum().astype(int)
+            )
+            
+            # Displaying absolute values in table form
             st.table(df_summary)
             st.info(f"Total Demand over {sim_days} days: **{cumulative_demand[-1]:.0f} units**")
 
@@ -99,17 +102,7 @@ with tab1:
             x=days, y=[requisite_inventory] * sim_days, mode='lines', name='Inventory Limit',
             line=dict(color='#d62728', dash='dash')
         ))
-        
-        # FIX: Applying same x-axis clean up here
-        fig_cum.update_layout(
-            template="plotly_white", 
-            yaxis_title="Units",
-            xaxis=dict(
-                tickangle=0,
-                nticks=15,
-                tickmode='auto'
-            )
-        )
+        fig_cum.update_layout(template="plotly_white", yaxis_title="Units")
         st.plotly_chart(fig_cum, use_container_width=True)
 
         # Final Analysis
@@ -118,7 +111,6 @@ with tab1:
             st.error(f"❌ **Stockout!** Short by **{total_actual - requisite_inventory:.0f} units**.")
         else:
             st.success(f"✅ **Safe.** Surplus of **{requisite_inventory - total_actual:.0f} units**.")
-
 with tab2:
     st.header("Demand Histogram Analyzer")
     
