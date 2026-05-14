@@ -12,12 +12,8 @@ tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "�
 
 with tab1:
     st.header("⚖️ The Flaw of Averages Stress Test")
-    st.markdown("""
-    **The Scenario:** You've calculated that your Average Daily Sales is **40 units**. 
-    How much stock do you *actually* want to hold to cover your 10-day lead time?
-    """)
-
-    # --- Setup the Data Inputs ---
+    
+    # --- Input Section ---
     col1, col2 = st.columns(2)
     
     with col1:
@@ -26,73 +22,70 @@ with tab1:
         lead_time = st.number_input("Lead Time (Days to Replenish)", value=10)
         
     with col2:
-        # Calculate ADS for reference
+        # Calculate ADS
         avg_daily_sales = annual_sales / working_days
         st.metric("Avg. Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
         
-        # User explicitly inputs their inventory strategy
+        # User Strategy Input
         suggested_baseline = avg_daily_sales * lead_time
         requisite_inventory = st.number_input(
-            "Enter Requisite Inventory for 10 Days", 
-            value=int(suggested_baseline),
-            help=f"The theoretical average is {suggested_baseline:.0f}. Try entering this first, then try a higher number."
+            "Enter Requisite Inventory for Lead Time", 
+            value=int(suggested_baseline)
         )
 
-    st.write(f"📊 **Strategy:** You are prepared to fulfill up to **{requisite_inventory} units** during the lead time.")
+    # New Slider for Standard Deviation
+    std_dev = st.slider("Demand Standard Deviation (Volatility)", 0, 50, 10)
 
-    # --- The Trigger Button ---
-    if st.button("Run Reality Check"):
-        
-        # Fixed volatility to demonstrate the 'spikiness' of real demand
-        volatility = 0.7 
-        
+    # --- Next Button Logic ---
+    if st.button("Next"):
+        # Generate Demand based on ADS and Std Dev
         np.random.seed(42) 
-        daily_demand = np.random.normal(avg_daily_sales, avg_daily_sales * volatility, lead_time)
+        daily_demand = np.random.normal(avg_daily_sales, std_dev, lead_time)
         daily_demand = np.clip(daily_demand, 0, None).round(0)
         
         cumulative_demand = np.cumsum(daily_demand)
         days = [f"Day {i+1}" for i in range(lead_time)]
         
-        # --- Visualization ---
-        fig = go.Figure()
+        # --- Daily Demand Plot ---
+        st.subheader("📈 Daily Demand Volatility")
+        fig_daily = go.Figure()
+        fig_daily.add_trace(go.Scatter(
+            x=days, y=daily_demand, 
+            mode='lines+markers', name='Daily Demand',
+            line=dict(color='#1f77b4', width=2)
+        ))
+        fig_daily.add_hline(y=avg_daily_sales, line_dash="dash", line_color="gray", annotation_text="Average")
+        fig_daily.update_layout(template="plotly_white", height=300, margin=dict(t=20, b=20))
+        st.plotly_chart(fig_daily, use_container_width=True)
 
-        # Cumulative Actual Demand (Blue Line)
-        fig.add_trace(go.Scatter(
-            x=days, 
-            y=cumulative_demand, 
-            mode='lines+markers', 
-            name='Actual Cumulative Demand',
+        # --- Cumulative Plot (The Stress Test) ---
+        st.subheader("⚖️ Cumulative Stress Test")
+        fig_cum = go.Figure()
+        
+        # Actual Cumulative Demand
+        fig_cum.add_trace(go.Scatter(
+            x=days, y=cumulative_demand, 
+            mode='lines+markers', name='Actual Total Demand',
             line=dict(color='#1f77b4', width=3)
         ))
 
-        # The User's Inputted Inventory Limit (Red Dash)
-        fig.add_trace(go.Scatter(
-            x=days, 
-            y=[requisite_inventory] * lead_time, 
-            mode='lines', 
-            name='Your Inputted Inventory',
+        # Requisite Inventory Line
+        fig_cum.add_trace(go.Scatter(
+            x=days, y=[requisite_inventory] * lead_time, 
+            mode='lines', name='Your Inventory Limit',
             line=dict(color='#d62728', dash='dash')
         ))
 
-        fig.update_layout(
-            title="Actual Demand vs. Your Inventory Level",
-            xaxis_title="Days in Lead Time",
-            yaxis_title="Units",
-            template="plotly_white",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
+        fig_cum.update_layout(template="plotly_white", yaxis_title="Units")
+        st.plotly_chart(fig_cum, use_container_width=True)
 
-        st.plotly_chart(fig, use_container_width=True)
-
-        # --- Analysis ---
+        # Result Logic
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
-            stockout_day = np.where(cumulative_demand > requisite_inventory)[0][0] + 1
-            st.error(f"❌ **Stockout on Day {stockout_day}!**")
-            st.write(f"Your chosen inventory of **{requisite_inventory}** was not enough for the actual demand of **{total_actual:.0f}**.")
+            st.error(f"❌ **Stockout!** Total demand ({total_actual:.0f}) exceeded inventory ({requisite_inventory}).")
         else:
-            margin = requisite_inventory - total_actual
-            st.success(f"✅ **Safe.** You ended the lead time with **{margin:.0f} units** left over.")
+            st.success(f"✅ **Safe.** You had {requisite_inventory - total_actual:.0f} units remaining.")
+
 
 
 with tab2:
