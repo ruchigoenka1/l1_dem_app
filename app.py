@@ -8,9 +8,88 @@ st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
 st.title("🚀 Supply Chain Analytics Platform")
 
-tab1, tab2, tab3 = st.tabs(["📊 Demand Histogram", "📈 Demand Forecasting", "📦 Inventory Optimization"])
+tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "📦 Inventory Optimization"])
 
 with tab1:
+    st.header("⚖️ The Flaw of Averages Stress Test")
+    st.markdown("""
+    **The Goal:** Demonstrate why ordering based strictly on average daily sales creates internal sabotage during the replenishment lead time.
+    """)
+
+    # --- Setup the Data Inputs ---
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        annual_sales = st.number_input("Annual Sales (Units)", value=12000, step=500)
+        working_days = st.number_input("Working Days per Year", value=300)
+        lead_time = st.number_input("Lead Time (Days to Replenish)", value=10)
+        
+    with col2:
+        # Calculate derived metrics
+        avg_daily_sales = annual_sales / working_days
+        requisite_inventory = avg_daily_sales * lead_time
+        
+        st.metric("Average Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
+        st.metric("Requisite Inventory (ADS × Lead Time)", f"{requisite_inventory:.2f}")
+        
+        # Volatility slider to simulate real-world variance
+        volatility = st.slider("Demand Variance (High = More Spiky)", 0.1, 1.5, 0.6)
+
+    st.divider()
+
+    # --- The Trigger Button ---
+    if st.button("Simulate 10-Day Lead Time Demand"):
+        # Simulate demand using a normal distribution
+        np.random.seed(42) 
+        # Daily demand cannot be negative, so we use clip
+        daily_demand = np.random.normal(avg_daily_sales, avg_daily_sales * volatility, lead_time)
+        daily_demand = np.clip(daily_demand, 0, None).round(0)
+        
+        cumulative_demand = np.cumsum(daily_demand)
+        days = [f"Day {i+1}" for i in range(lead_time)]
+        
+        # --- Visualization ---
+        fig = go.Figure()
+
+        # Cumulative Actual Demand (Blue Line)
+        fig.add_trace(go.Scatter(
+            x=days, 
+            y=cumulative_demand, 
+            mode='lines+markers', 
+            name='Actual Cumulative Demand',
+            line=dict(color='#1f77b4', width=3)
+        ))
+
+        # The "Average" Inventory Limit (Red Dash)
+        fig.add_trace(go.Scatter(
+            x=days, 
+            y=[requisite_inventory] * lead_time, 
+            mode='lines', 
+            name='Stock Based on Average',
+            line=dict(color='#d62728', dash='dash')
+        ))
+
+        fig.update_layout(
+            title="Actual Demand vs. Static Average Inventory",
+            xaxis_title="Days in Lead Time",
+            yaxis_title="Units",
+            template="plotly_white",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- Analysis ---
+        total_actual = cumulative_demand[-1]
+        if total_actual > requisite_inventory:
+            stockout_day = np.where(cumulative_demand > requisite_inventory)[0][0] + 1
+            st.error(f"⚠️ **Stockout Detected!** Your inventory ran out on **Day {stockout_day}**.")
+            st.write(f"By the time the truck arrived (Day 10), you were short by **{total_actual - requisite_inventory:.0f} units**.")
+        else:
+            st.success(f"✅ **Stock Maintained.** In this specific simulation, the average was enough. (Try increasing variance to see the risk).")
+    
+
+with tab2:
     st.header("Demand Histogram Analyzer")
     
     # --- 1. Data Configuration ---
@@ -195,10 +274,10 @@ with tab1:
             st.dataframe(bin_df, use_container_width=True, hide_index=True)
 
 # Placeholder layouts for future tabs
-with tab2:
+with tab3:
     st.header("Demand Forecasting Analytics")
     st.info("Forecasting models can be plugged in here.")
 
-with tab3:
+with tab4:
     st.header("Inventory Optimization Insights")
     st.info("Safety stock and reorder point metrics can be implemented here.")
