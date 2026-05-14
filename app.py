@@ -202,7 +202,7 @@ with tab1:
         if total_deficits > 0:
             st.error(f"❌ **Internal Sabotage Confirmed:** Volatility breached your static 'Average' allocation baseline strategy on **{total_deficits} separate window cycles** ({pct_deficits:.1f}% risk rate).")
         else:
-            st.success(f"✅ **Buffer Sufficient:** Your chosen inventory strategy target)
+            st.success(f"✅ **Buffer Sufficient:** Your chosen inventory strategy target")
 
             
 with tab2:
