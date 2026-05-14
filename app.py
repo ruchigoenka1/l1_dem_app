@@ -13,8 +13,8 @@ tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "�
 with tab1:
     st.header("⚖️ The Flaw of Averages Stress Test")
     st.markdown("""
-    **The Scenario:** You calculate your inventory needs based on perfect annual averages. 
-    But customers don't buy in 'averages'—they buy in 'spikes'.
+    **The Scenario:** You've calculated that your Average Daily Sales is **40 units**. 
+    How much stock do you *actually* want to hold to cover your 10-day lead time?
     """)
 
     # --- Setup the Data Inputs ---
@@ -26,20 +26,24 @@ with tab1:
         lead_time = st.number_input("Lead Time (Days to Replenish)", value=10)
         
     with col2:
-        # Calculate derived metrics
+        # Calculate ADS for reference
         avg_daily_sales = annual_sales / working_days
-        requisite_inventory = avg_daily_sales * lead_time
+        st.metric("Avg. Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
         
-        st.metric("Average Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
-        st.metric("Requisite Inventory (ADS × Lead Time)", f"{requisite_inventory:.2f}")
+        # User explicitly inputs their inventory strategy
+        suggested_baseline = avg_daily_sales * lead_time
+        requisite_inventory = st.number_input(
+            "Enter Requisite Inventory for 10 Days", 
+            value=int(suggested_baseline),
+            help=f"The theoretical average is {suggested_baseline:.0f}. Try entering this first, then try a higher number."
+        )
 
-    st.info("💡 Calculation: Based on your average, you need exactly **{:.0f} units** to last until the next shipment.".format(requisite_inventory))
+    st.write(f"📊 **Strategy:** You are prepared to fulfill up to **{requisite_inventory} units** during the lead time.")
 
     # --- The Trigger Button ---
-    if st.button("Run Reality Check (Simulate 10-Day Demand)"):
+    if st.button("Run Reality Check"):
         
-        # We define volatility inside the button logic or a sidebar to keep the main view clean
-        # Using a fixed high volatility (e.g., 0.7) to ensure the point is made immediately
+        # Fixed volatility to demonstrate the 'spikiness' of real demand
         volatility = 0.7 
         
         np.random.seed(42) 
@@ -61,17 +65,17 @@ with tab1:
             line=dict(color='#1f77b4', width=3)
         ))
 
-        # The "Average" Inventory Limit (Red Dash)
+        # The User's Inputted Inventory Limit (Red Dash)
         fig.add_trace(go.Scatter(
             x=days, 
             y=[requisite_inventory] * lead_time, 
             mode='lines', 
-            name='Stock Prepared (Average)',
+            name='Your Inputted Inventory',
             line=dict(color='#d62728', dash='dash')
         ))
 
         fig.update_layout(
-            title="Why Averages Fail: Actual Demand vs. Prepared Stock",
+            title="Actual Demand vs. Your Inventory Level",
             xaxis_title="Days in Lead Time",
             yaxis_title="Units",
             template="plotly_white",
@@ -80,20 +84,16 @@ with tab1:
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- Dynamic Analysis ---
+        # --- Analysis ---
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
             stockout_day = np.where(cumulative_demand > requisite_inventory)[0][0] + 1
             st.error(f"❌ **Stockout on Day {stockout_day}!**")
-            st.write(f"The 'Average' told you to keep {requisite_inventory:.0f} units. Reality demanded {total_actual:.0f} units.")
+            st.write(f"Your chosen inventory of **{requisite_inventory}** was not enough for the actual demand of **{total_actual:.0f}**.")
         else:
-            st.success(f"✅ **Survived... this time.** But notice how close the demand came to your limit.")
-            
-        # Optional: Show the variance slider only AFTER the first run if you want to let them experiment
-        st.write("---")
-        st.subheader("Adjust Volatility and Re-run")
-        new_vol = st.select_slider("Change Demand Spikiness:", options=[0.2, 0.4, 0.6, 0.8, 1.0, 1.2], value=0.7)
-        st.caption("Lowering this makes the blue line flatter (predictable); raising it makes it spikier (risky).")    
+            margin = requisite_inventory - total_actual
+            st.success(f"✅ **Safe.** You ended the lead time with **{margin:.0f} units** left over.")
+
 
 with tab2:
     st.header("Demand Histogram Analyzer")
