@@ -422,19 +422,27 @@ with tab2:
             cov_val = (std_val / mean_val) if mean_val > 0 else 0.0
             
             # Determine demand volatility profile category
-            if cov_val <= 0.2:
-                status_color = "green"
-                status_text = "🟢 Stable Demand"
-                explanation = "Demand is highly predictable. Recommended strategy: Lean replenishment with low safety stock buffers."
-            elif cov_val <= 0.5:
-                status_color = "orange"
+            if cov_val <= 0.10:
+                status_text = "🟢 Ultra-Stable / Constant"
+                explanation = "Highly repetitive and predictable demand. Use automated just-in-time (JIT) scheduling or lean kanbans. Minimize safety stock to release working capital."
+                alert_type = "success"
+            elif cov_val <= 0.25:
+                status_text = "🟢 Stable / Predictable"
+                explanation = "Normal variation patterns present. Standard statistical forecasting and fixed reorder points will yield high accuracy with minimal safety stock buffers."
+                alert_type = "success"
+            elif cov_val <= 0.50:
                 status_text = "🟡 Moderate Volatility"
-                explanation = "Demand exhibits routine variations. Recommended strategy: Balanced safety stock approach using statistical models."
+                explanation = "Demand exhibits noticeable fluctuations. Requires proactive demand sensing and traditional statistical safety stocks to counter stockout risks."
+                alert_type = "warning"
+            elif cov_val <= 1.00:
+                status_text = "🟠 High Volatility"
+                explanation = "Highly variable demand spikes. Avoid automated ordering systems without collaborative forecasting inputs. Expect to maintain higher, dynamic safety stock thresholds."
+                alert_type = "warning"
             else:
-                status_color = "red"
-                status_text = "🔴 Highly Volatile"
-                explanation = "Demand is highly unpredictable. Recommended strategy: Dynamic safety stock buffers, frequent review cycles, or responsive build-to-order logic."
-
+                status_text = "🔴 Erratic / Lumpy / Sporadic"
+                explanation = "Highly unpredictable or intermittent demand. Traditional safety stock formulas do not work well here. Consider move-to-order (MTO) execution or project-based buffers."
+                alert_type = "error"
+                
             # Render key calculation metrics inside columns
             m_col1, m_col2, m_col3 = st.columns(3)
             with m_col1:
