@@ -20,30 +20,33 @@ with tab1:
     with col1:
         annual_sales = st.number_input("Annual Sales (Units)", value=12000, step=500)
         working_days = st.number_input("Working Days per Year", value=300)
-        lead_time = st.number_input("Lead Time (Days to Replenish)", value=10)
+        # New input for simulation length
+        sim_days = st.number_input("Simulation Days (Lead Time)", value=10, min_value=1)
         
     with col2:
         avg_daily_sales = annual_sales / working_days
         st.metric("Avg. Daily Sales (ADS)", f"{avg_daily_sales:.2f}")
         
-        suggested_baseline = avg_daily_sales * lead_time
+        # Suggested baseline updates dynamically based on sim_days
+        suggested_baseline = avg_daily_sales * sim_days
         requisite_inventory = st.number_input(
-            "Enter Requisite Inventory for Lead Time", 
+            f"Enter Inventory Prepared for {sim_days} Days", 
             value=int(suggested_baseline)
         )
 
     # --- Next Button Logic ---
     if st.button("Next"):
-        # Reveals the Volatility Slider
+        # Reveal Volatility Slider
         std_dev = st.slider("Demand Standard Deviation (Volatility)", 0, 50, 10)
 
         # Generate Demand Data
         np.random.seed(42) 
-        daily_demand = np.random.normal(avg_daily_sales, std_dev, lead_time)
+        # Using sim_days instead of hardcoded 10
+        daily_demand = np.random.normal(avg_daily_sales, std_dev, sim_days)
         daily_demand = np.clip(daily_demand, 0, None).round(0)
         
         cumulative_demand = np.cumsum(daily_demand)
-        days = [f"Day {i+1}" for i in range(lead_time)]
+        days = [f"Day {i+1}" for i in range(sim_days)]
         
         # --- 1. Daily Demand Volatility Graph ---
         st.subheader("📈 Daily Demand Volatility")
@@ -60,12 +63,12 @@ with tab1:
         # --- 2. Generated Demand Data Table (Collapsible) ---
         with st.expander("📋 Generated Demand Data Table", expanded=False):
             df_summary = pd.DataFrame({
-                "Lead Time Day": days,
-                "Daily Demand (Units)": daily_demand.astype(int),
+                "Day": days,
+                "Daily Demand": daily_demand.astype(int),
                 "Cumulative Demand": cumulative_demand.astype(int)
             })
-            st.table(df_summary) # Displaying absolute values as requested
-            st.info(f"Total Lead Time Demand: **{cumulative_demand[-1]:.0f} units**")
+            st.table(df_summary) # Displaying absolute values as per preference
+            st.info(f"Total Demand over {sim_days} days: **{cumulative_demand[-1]:.0f} units**")
 
         # --- 3. Cumulative Stress Test Graph ---
         st.subheader("⚖️ Cumulative Stress Test")
@@ -78,20 +81,21 @@ with tab1:
         ))
 
         fig_cum.add_trace(go.Scatter(
-            x=days, y=[requisite_inventory] * lead_time, 
-            mode='lines', name='Inventory Limit (Your Strategy)',
+            x=days, y=[requisite_inventory] * sim_days, 
+            mode='lines', name='Inventory Limit',
             line=dict(color='#d62728', dash='dash')
         ))
 
         fig_cum.update_layout(template="plotly_white", yaxis_title="Units")
         st.plotly_chart(fig_cum, use_container_width=True)
 
-        # Final Diagnostics
+        # Final Analysis
         total_actual = cumulative_demand[-1]
         if total_actual > requisite_inventory:
-            st.error(f"❌ **Stockout!** Your inventory level was insufficient to cover the volatility.")
+            st.error(f"❌ **Stockout!** Your inventory ran out at {total_actual:.0f} units.")
         else:
-            st.success(f"✅ **Safe.** Your strategy successfully covered the demand spikes.")
+            st.success(f"✅ **Safe.** You covered the demand with {requisite_inventory - total_actual:.0f} units to spare.")
+
 
 with tab2:
     st.header("Demand Histogram Analyzer")
