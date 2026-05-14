@@ -270,9 +270,7 @@ with tab2:
                     else:
                         df_upload = pd.read_excel(uploaded_file)
                     
-                    # Validation Check: Ensure 'Demand' column exists
                     if 'Demand' in df_upload.columns:
-                        # Clean data: drop missing values and ensure numerical types
                         df = df_upload[['Demand']].dropna().copy()
                         df['Demand'] = pd.to_numeric(df['Demand'], errors='coerce')
                         df = df.dropna()
@@ -286,10 +284,7 @@ with tab2:
             st.markdown("#### 📋 Download Template")
             st.caption("Please match your data format to this template. The sheet must include a column header named **Demand**.")
             
-            # Constructing a sample template dataframe on the fly
             template_df = pd.DataFrame({'Demand': [120, 95, 110, 135, 80, 105, 115]})
-            
-            # Creating Excel file stream using BytesIO
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 template_df.to_excel(writer, index=False, sheet_name='Template')
@@ -406,6 +401,52 @@ with tab2:
                 "Cum. %": pct_total.cumsum().round(1)
             })
             st.dataframe(bin_df, use_container_width=True, hide_index=True)
+
+        # --- 4. Coefficient of Variation (CoV) Analysis ---
+        st.divider()
+        st.subheader("📊 Demand Volatility Analysis (CoV)")
+        
+        cov_col1, cov_col2 = st.columns([1, 2])
+        
+        with cov_col1:
+            st.markdown("#### Formula")
+            st.latex(r"CoV = \frac{\sigma}{\mu}")
+            st.caption(r"Where $\sigma$ = Standard Deviation and $\mu$ = Mean")
+            
+        with cov_col2:
+            # Extract statistics directly from data stream
+            mean_val = float(df['Demand'].mean())
+            std_val = float(df['Demand'].std())
+            
+            # Defensive check for edge case where mean is zero
+            cov_val = (std_val / mean_val) if mean_val > 0 else 0.0
+            
+            # Determine demand volatility profile category
+            if cov_val <= 0.2:
+                status_color = "green"
+                status_text = "🟢 Stable Demand"
+                explanation = "Demand is highly predictable. Recommended strategy: Lean replenishment with low safety stock buffers."
+            elif cov_val <= 0.5:
+                status_color = "orange"
+                status_text = "🟡 Moderate Volatility"
+                explanation = "Demand exhibits routine variations. Recommended strategy: Balanced safety stock approach using statistical models."
+            else:
+                status_color = "red"
+                status_text = "🔴 Highly Volatile"
+                explanation = "Demand is highly unpredictable. Recommended strategy: Dynamic safety stock buffers, frequent review cycles, or responsive build-to-order logic."
+
+            # Render key calculation metrics inside columns
+            m_col1, m_col2, m_col3 = st.columns(3)
+            with m_col1:
+                st.metric("Mean ($\mu$)", f"{mean_val:.2f}")
+            with m_col2:
+                st.metric("Std Dev ($\sigma$)", f"{std_val:.2f}")
+            with m_col3:
+                st.metric("Calculated CoV", f"{cov_val:.3f}")
+                
+            # Render descriptive behavioral classification banner
+            st.markdown(f"### Profile: {status_text}")
+            st.info(explanation)
 
 # Placeholder layouts for future tabs
 with tab3:
