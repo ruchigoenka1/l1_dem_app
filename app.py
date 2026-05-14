@@ -8,6 +8,8 @@ import plotly.graph_objects as go
 # --- Session State Initialization ---
 if 'next_clicked' not in st.session_state:
     st.session_state.next_clicked = False
+if 'seed_counter' not in st.session_state:
+    st.session_state.seed_counter = 42
 
 st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
@@ -59,8 +61,14 @@ with tab1:
         with c3:
             rolling_window = st.number_input("Look-Forward Window (Days)", value=10, min_value=1, max_value=int(sim_days))
 
-        # Generate Volatile Demand Data Array
-        np.random.seed(42)  # Ensures audit consistency across runs
+        # Action Buttons Layout: Regenerate Button Added Here
+        btn_col1, btn_col2 = st.columns([1, 5])
+        with btn_col1:
+            if st.button("🔄 Regenerate Demand"):
+                st.session_state.seed_counter += 1  # Shifts the seed to force a new layout run
+
+        # Generate Volatile Demand Data Array using our tracked state seed
+        np.random.seed(st.session_state.seed_counter)
         daily_demand = np.random.normal(avg_daily_sales, std_dev, sim_days)
         daily_demand = np.clip(daily_demand, 0, None).round(0)  # Prevents impossible negative demand days
         
@@ -134,9 +142,8 @@ with tab1:
             st.write(df_table.to_html(escape=False, index=False), unsafe_allow_html=True)
             st.write("<br>", unsafe_allow_html=True)
 
-        # --- Visual Asset 3: NEW Collapsible Charts for Forward Window Analytics ---
+        # --- Visual Asset 3: Collapsible Charts for Forward Window Analytics ---
         with st.expander("📊 View Forward Window Trend & Distribution Analysis", expanded=False):
-            # Isolate clean data pairs that contain actual window metrics
             df_clean_charts = df_summary.dropna().copy()
             
             graph_col1, graph_col2 = st.columns(2)
@@ -145,7 +152,6 @@ with tab1:
                 st.markdown(f"#### 📉 Forward Window Demand Trend")
                 fig_trend = go.Figure()
                 
-                # Plot forward window demand values
                 fig_trend.add_trace(go.Scatter(
                     x=df_clean_charts["Lead Time Day"], 
                     y=df_clean_charts[f"Demand Next {rolling_window} Days"],
@@ -153,7 +159,6 @@ with tab1:
                     name=f'{rolling_window}-Day Demand',
                     line=dict(color='#1f77b4', width=2)
                 ))
-                # Horizontal target safety threshold ceiling line
                 fig_trend.add_hline(
                     y=requisite_inventory, 
                     line_dash="dash", 
@@ -173,14 +178,12 @@ with tab1:
             with graph_col2:
                 st.markdown(f"#### 📊 Look-Forward Window Distribution")
                 
-                # Determine colors based on whether bins sit above or below the stock threshold limit
                 fig_hist = px.histogram(
                     df_clean_charts, 
                     x=f"Demand Next {rolling_window} Days",
                     nbins=20,
                     color_discrete_sequence=['#1f77b4']
                 )
-                # Vertical line marker indicating where capacity runs out
                 fig_hist.add_vline(
                     x=requisite_inventory, 
                     line_dash="dash", 
@@ -202,8 +205,7 @@ with tab1:
         if total_deficits > 0:
             st.error(f"❌ **Internal Sabotage Confirmed:** Volatility breached your static 'Average' allocation baseline strategy on **{total_deficits} separate window cycles** ({pct_deficits:.1f}% risk rate).")
         else:
-            st.success(f"✅ **Buffer Sufficient:** Your chosen inventory strategy target")
-
+            st.success(f"✅ **Strategic Parameter Verified.** Under these isolated settings, the current allocation buffer safely absorbed the simulated variance across all window blocks.")
             
 with tab2:
     st.header("Demand Histogram Analyzer")
