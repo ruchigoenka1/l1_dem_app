@@ -12,7 +12,7 @@ tab1, tab2, tab3 = st.tabs(["📊 Demand Histogram", "📈 Demand Forecasting", 
 with tab1:
     st.header("Demand Histogram Analyzer")
     
-    # --- Data Configuration ---
+    # --- 1. Data Configuration ---
     st.subheader("1. Data Configuration")
     data_source = st.radio("Select Data Source:", ("Generate Synthetic Data", "Upload Your Own Data"), horizontal=True, key="ds_p1")
 
@@ -40,39 +40,48 @@ with tab1:
         elif dist_type == "Poisson":
             generated = np.random.poisson(avg_demand, num_periods)
         else:
-            # FIX: Use floor to ensure we don't round UP above the max limit
+            # FIX: Ensure strictly within max limit by avoiding rounding up
             generated = np.random.uniform(avg_demand - variation, avg_demand + variation, num_periods)
         
         df = pd.DataFrame({'Demand': np.floor(np.clip(generated, 0, None))})
 
-    # --- Analysis & Visualization ---
+    # --- 2. Advanced Analysis (Thresholds & Percentiles) ---
     if df is not None:
         st.divider()
+        st.subheader("2. Probability & Coverage Analysis")
         
-        # New Feature: Threshold Analysis
-        st.subheader("2. Threshold & Service Level Analysis")
-        t_col1, t_col2 = st.columns([1, 2])
-        with t_col1:
-            threshold = st.number_input("Check points below value:", value=40.0, step=1.0)
+        analysis_col1, analysis_col2 = st.columns(2)
+        
+        with analysis_col1:
+            st.markdown("#### Threshold Lookup (Points Below X)")
+            threshold = st.number_input("Enter Demand Value:", value=40.0, step=1.0)
             count_below = len(df[df['Demand'] < threshold])
             percent_below = (count_below / len(df)) * 100
-            st.metric("Points Below Threshold", f"{count_below}", f"{percent_below:.1f}% of total")
-        with t_col2:
-            st.info(f"💡 This indicates that in **{percent_below:.1f}%** of periods, demand was lower than {threshold}. In inventory terms, this helps you visualize your service level or potential stock-out risk.")
+            st.metric(f"Probability of Demand < {threshold}", f"{percent_below:.1f}%")
+            st.caption(f"There are {count_below} periods where demand was less than {threshold}.")
+
+        with analysis_col2:
+            st.markdown("#### Percentile Lookup (Coverage Level)")
+            target_perc = st.number_input("Enter Service Level % (e.g. 95):", min_value=0.0, max_value=100.0, value=95.0, step=1.0)
+            # Calculate the value at the given percentile
+            demand_at_perc = np.percentile(df['Demand'], target_perc)
+            st.metric(f"Demand at {target_perc}% Service Level", f"{int(demand_at_perc)}")
+            st.caption(f"To cover {target_perc}% of all periods, you need to satisfy a demand of {int(demand_at_perc)}.")
 
         st.divider()
         st.subheader("3. Visual Distribution")
+        
+        # UI matching Screenshot 2026-05-14 at 12.08.41 PM.jpg
         num_bins = st.slider("Select Number of Bins:", 5, 50, 15)
         
-        # Main Display: Chart, Table, and Summary
         chart_col, table_col = st.columns([2, 1])
 
         with chart_col:
             fig = px.histogram(df, x="Demand", nbins=num_bins, template="plotly_white", color_discrete_sequence=['#4F8BF9'])
-            fig.update_layout(bargap=0.1)
+            fig.update_layout(bargap=0.1, xaxis_title="Demand Quantity", yaxis_title="Count of Periods")
             st.plotly_chart(fig, use_container_width=True)
             
-            # Data Summary Table (Requested)
+            # Data Summary Table
             st.markdown("#### 📋 Statistical Summary")
             summary_stats = df['Demand'].describe().to_frame().T
             st.dataframe(summary_stats[['mean', 'std', 'min', '25%', '50%', '75%', 'max']], use_container_width=True)
@@ -82,7 +91,7 @@ with tab1:
             counts, bin_edges = np.histogram(df['Demand'], bins=num_bins)
             bin_df = pd.DataFrame({
                 "Bin Range": [f"{int(bin_edges[i])} - {int(bin_edges[i+1])}" for i in range(len(bin_edges)-1)],
-                "Count": counts,
-                "%": (counts / len(df) * 100).round(1)
+                "Frequency (Count)": counts,
+                "% of Total": (counts / len(df) * 100).round(1)
             })
             st.dataframe(bin_df, use_container_width=True, hide_index=True)
