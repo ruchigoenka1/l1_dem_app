@@ -18,11 +18,11 @@ st.title("🚀 Supply Chain Analytics Platform")
 tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "📦 Inventory Optimization"])
 
 with tab1:
-    st.header("⚖️ The Flaw of Averages Stress Test")
-    st.markdown("""
-    **The Concept:** Demonstrating how static, average-based demand strategies systematically introduce internal sabotage. 
-    While an average looks clean over a 300-day window, daily variability will trigger stockouts during finite replenishment cycles.
-    """)
+    st.header("The Basic Thumb Rule Used For Inventory Planning")
+    # st.markdown("""
+    # **The Concept:** Demonstrating how static, average-based demand strategies systematically introduce internal sabotage. 
+    # While an average looks clean over a 300-day window, daily variability will trigger stockouts during finite replenishment cycles.
+    # """)
     
     # --- Step 1: Baseline Strategy Input Section ---
     col1, col2 = st.columns(2)
