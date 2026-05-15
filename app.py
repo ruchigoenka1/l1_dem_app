@@ -4,6 +4,7 @@ import numpy as np
 import plotly.express as px
 import io
 import plotly.graph_objects as go
+from prophet import Prophet
 
 # --- Session State Initialization ---
 if 'next_clicked' not in st.session_state:
@@ -458,8 +459,82 @@ with tab2:
 
 # Placeholder layouts for future tabs
 with tab3:
-    st.header("Demand Forecasting Analytics")
-    st.info("Forecasting models can be plugged in here.")
+    st.header("🔮 Advanced AI Forecasting (Prophet)")
+    
+    # 1. Choose Source
+    f_source = st.radio("Select Source:", ("Simulate Trend/Seasonality", "Use Uploaded Data"), horizontal=True, key="f_src")
+
+    df_prophet = None
+
+    if f_source == "Simulate Trend/Seasonality":
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            growth = st.slider("Growth Trend", -0.1, 0.1, 0.02, step=0.01)
+        with col2:
+            season_amp = st.slider("Seasonality Strength", 0, 50, 20)
+        with col3:
+            noise = st.slider("Noise Level", 1, 20, 5)
+
+        # Generate 2 years of daily data
+        dates = pd.date_range(start="2024-01-01", periods=730, freq='D')
+        t = np.arange(len(dates))
+        y = 100 + (growth * t) + (season_amp * np.sin(2 * np.pi * t / 365.25)) + np.random.normal(0, noise, len(dates))
+        
+        df_prophet = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y)})
+    
+    else:
+        if 'uploaded_file' in locals() and uploaded_file is not None:
+            try:
+                # Prophet requires columns 'ds' (date) and 'y' (value)
+                raw = pd.read_excel(uploaded_file)
+                # Assuming the excel has 'Date' and 'Demand'
+                df_prophet = raw.rename(columns={'Date': 'ds', 'Demand': 'y'})
+                df_prophet['ds'] = pd.to_datetime(df_prophet['ds'])
+            except Exception as e:
+                st.error(f"Error: Ensure Excel has 'Date' and 'Demand' columns. {e}")
+        else:
+            st.warning("Please upload data in Tab 1 first.")
+
+    if df_prophet is not None:
+        st.divider()
+        
+        # 2. Model Training & Prediction
+        periods_to_forecast = st.number_input("Days to Forecast into Future:", min_value=7, max_value=365, value=90)
+        
+        m = Prophet(yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
+        m.fit(df_prophet)
+        
+        future = m.make_future_dataframe(periods=periods_to_forecast)
+        forecast = m.predict(future)
+
+        # 3. Visualization
+        st.subheader("Forecast Results")
+        fig_f = go.Figure()
+
+        # Actuals
+        fig_f.add_trace(go.Scatter(x=df_prophet['ds'], y=df_prophet['y'], mode='markers', name='Actual Demand', marker=dict(color='black', size=4)))
+        # Trend / Forecast
+        fig_f.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='AI Forecast', line=dict(color='#4F8BF9', width=3)))
+        # Uncertainty Interval
+        fig_f.add_trace(go.Scatter(
+            x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
+            y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
+            fill='toself', fillcolor='rgba(79, 139, 249, 0.2)', line=dict(color='rgba(255,255,255,0)'),
+            name='Uncertainty Range'
+        ))
+
+        fig_f.update_layout(template="plotly_white", xaxis_title="Date", yaxis_title="Demand Quantity")
+        st.plotly_chart(fig_f, use_container_width=True)
+
+        # 4. Decomposition
+        with st.expander("View Forecast Components (Trend & Seasonality)"):
+            st.write("Prophet breaks down demand into three distinct layers:")
+            # Prophet has a built-in plotting tool for components, but we'll show them as metrics
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**Long-term Trend:** Shows if your business is growing or shrinking.")
+            with c2:
+                st.markdown("**Weekly/Yearly Patterns:** Shows 'Peak' days and months.")
 
 with tab4:
     st.header("Inventory Optimization Insights")
