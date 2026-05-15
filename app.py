@@ -461,105 +461,112 @@ with tab2:
 with tab3:
     st.header("🧬 Stage 3: The Probability Truth")
     
-    # --- 1. DATA SOURCE SELECTION ---
-    data_mode = st.radio("Select Data Mode:", ("Simulate Scenarios", "Upload Real Data"), horizontal=True)
+    # --- 1. CONFIGURATION (Simulation vs Upload) ---
+    data_mode = st.radio("Data Mode:", ("Simulation", "Upload Data"), horizontal=True)
     
-    df_workshop = None
+    df_truth = None
 
-    if data_mode == "Simulate Scenarios":
+    if data_mode == "Simulation":
         with st.container(border=True):
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5 = st.columns(5)
             with c1:
-                level = st.number_input("Base Level", value=100.0)
-                growth = st.number_input("Growth Trend (per year %)", value=5.0) 
+                level = st.number_input("Level (Start)", value=100.0)
+                growth = st.number_input("Growth (%)", value=5.0)
             with c2:
-                base_amp = st.number_input("Base Amplitude", value=400.0)
+                base_amp = st.number_input("Base Amp", value=400.0)
                 target_cov = st.number_input("Target CoV", value=0.15)
             with c3:
                 surcharge = st.slider("Peak Surcharge %", 0, 100, 30)
             with c4:
-                forecast_days = st.number_input("Days to Forecast", value=365)
+                forecast_days = st.number_input("Forecast Days", value=365)
+            with c5:
+                # Baseline is effectively Level + Base
+                baseline = level + base_amp
+                st.metric("Total Baseline", f"{baseline}")
 
         # GENERATION LOGIC
         dates = pd.date_range(start="2023-01-01", periods=730, freq='D')
         t = np.arange(len(dates))
+        
+        # Apply Growth Trend
         growth_factor = (1 + growth/100) ** (t / 365)
         seasonal_wave = np.sin(2 * np.pi * t / 365.25)
         
-        y_vals = (level + base_amp + (seasonal_wave * (base_amp * 0.5))) * growth_factor
+        y_vals = (baseline + (seasonal_wave * (base_amp * 0.5))) * growth_factor
         y_vals += np.random.normal(0, (base_amp * target_cov), len(dates))
         
-        df_workshop = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y_vals)})
+        df_truth = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y_vals)})
         
-        # Apply Surcharge and Labels
-        threshold_val = (level + base_amp) * 1.2
-        df_workshop.loc[df_workshop['y'] > threshold_val, 'y'] *= (1 + surcharge/100)
+        # Apply Surcharge and Seasonal Labels
+        high_threshold = baseline * 1.25
+        low_threshold = baseline * 0.75
+        
+        df_truth.loc[df_truth['y'] > high_threshold, 'y'] *= (1 + surcharge/100)
+
+        def get_label(val):
+            if val > high_threshold: return "High"
+            if val < low_threshold: return "Low"
+            return "Normal"
+        df_truth['Seasonality'] = df_truth['y'].apply(get_label)
 
     else:
-        uploaded_file_t3 = st.file_uploader("Upload Historical Demand (.xlsx)", type=["xlsx"], key="t3_uploader")
-        forecast_days = st.number_input("Days to Forecast into Future", value=90)
-        
-        if uploaded_file_t3:
-            try:
-                raw_df = pd.read_excel(uploaded_file_t3)
-                # Expecting 'Date' and 'Demand' columns
-                df_workshop = raw_df.rename(columns={'Date': 'ds', 'Demand': 'y'})
-                df_workshop['ds'] = pd.to_datetime(df_workshop['ds'])
-                st.success("File uploaded successfully!")
-            except Exception as e:
-                st.error(f"Error: Ensure file has 'Date' and 'Demand' columns. {e}")
-        else:
-            st.info("Awaiting Excel upload...")
+        uploaded_file = st.file_uploader("Upload Data", type=["xlsx"])
+        if uploaded_file:
+            df_truth = pd.read_excel(uploaded_file).rename(columns={'Date':'ds', 'Demand':'y'})
+            df_truth['ds'] = pd.to_datetime(df_truth['ds'])
+            # Auto-labeling for matrix
+            q1, q3 = df_truth['y'].quantile([0.25, 0.75])
+            df_truth['Seasonality'] = df_truth['y'].apply(lambda x: 'High' if x > q3 else ('Low' if x < q1 else 'Normal'))
+        forecast_days = 90
 
-    # --- 2. ANALYSIS (ONLY RUN IF DATA EXISTS) ---
-    if df_workshop is not None:
-        # Dynamic Labeling for Seasonal Breakdown
-        q1, q3 = df_workshop['y'].quantile([0.25, 0.75])
-        def auto_label(val):
-            if val > q3: return "High"
-            if val < q1: return "Low"
-            return "Normal"
-        df_workshop['Seasonality'] = df_workshop['y'].apply(auto_label)
-
-        # --- 3. METRICS ---
+    # --- 2. THE SEASONAL METRICS MATRIX ---
+    if df_truth is not None:
         st.divider()
-        seasonal_summary = df_workshop.groupby('Seasonality')['y'].agg(['mean', 'std', 'count']).reset_index()
-        seasonal_summary['CoV'] = (seasonal_summary['std'] / seasonal_summary['mean']).round(3)
+        st.subheader("📊 The Seasonal Metrics Matrix")
         
-        m_cols = st.columns(3)
-        for i, season in enumerate(["Low", "Normal", "High"]):
-            row = seasonal_summary[seasonal_summary['Seasonality'] == season].iloc[0]
-            m_cols[i].metric(f"{season} Season Avg", f"{row['mean']:.1f}", f"CoV: {row['CoV']}")
+        # Grouping and calculating metrics
+        matrix = df_truth.groupby('Seasonality')['y'].agg(['mean', 'std', 'min', 'max', 'count']).reset_index()
+        matrix['CoV'] = (matrix['std'] / matrix['mean']).round(3)
+        
+        # Rename for professional look
+        matrix.columns = ['Season', 'Avg Demand', 'Std Dev', 'Min', 'Max', 'Days Count', 'CoV']
+        
+        # Highlight matrix
+        st.dataframe(
+            matrix.style.background_gradient(subset=['CoV'], cmap='RdYlGn_r')
+            .format(precision=2),
+            use_container_width=True,
+            hide_index=True
+        )
 
-        # --- 4. VISUALS (Histograms) ---
-        c_left, c_right = st.columns(2)
-        with c_left:
+        # --- 3. DUAL HISTOGRAMS ---
+        col_l, col_r = st.columns(2)
+        with col_l:
             st.subheader("General Distribution")
-            st.plotly_chart(px.histogram(df_workshop, x="y", nbins=40, template="plotly_dark"), use_container_width=True)
-        with c_right:
-            st.subheader("Seasonal Breakdown")
-            fig_sea = px.histogram(df_workshop, x="y", color="Seasonality", nbins=40, template="plotly_dark",
-                                   color_discrete_map={"Normal": "#5B84B1", "High": "#FC766A", "Low": "#71918d"}, barmode='overlay')
+            st.plotly_chart(px.histogram(df_truth, x="y", template="plotly_dark", nbins=40), use_container_width=True)
+        with col_r:
+            st.subheader("Seasonal Truth")
+            fig_sea = px.histogram(df_truth, x="y", color="Seasonality", template="plotly_dark", barmode='overlay',
+                                   color_discrete_map={"Normal": "#5B84B1", "High": "#FC766A", "Low": "#71918d"})
             st.plotly_chart(fig_sea, use_container_width=True)
 
-        # --- 5. DATA TABLE & PROPHET ---
+        # --- 4. PROPHET & RAW DATA ---
         st.divider()
-        d_tab, f_tab = st.tabs(["Raw Data Table", "AI Prophet Forecast"])
+        t_raw, t_prophet = st.tabs(["📂 Detailed Data", "🔮 AI Prophet Forecast"])
         
-        with d_tab:
-            st.dataframe(df_workshop, use_container_width=True)
-            
-        with f_tab:
-            with st.spinner("AI is training on your data..."):
+        with t_raw:
+            st.dataframe(df_truth, use_container_width=True)
+        
+        with t_prophet:
+            with st.spinner("AI analyzing trend and seasonality..."):
                 m = Prophet(yearly_seasonality=True, weekly_seasonality=True)
-                m.fit(df_workshop)
+                m.fit(df_truth)
                 future = m.make_future_dataframe(periods=int(forecast_days))
                 forecast = m.predict(future)
                 
-                fig_f = px.line(forecast, x='ds', y='yhat', title="Prophet Projection")
-                fig_f.add_scatter(x=df_workshop['ds'], y=df_workshop['y'], mode='markers', name='Actuals', marker=dict(size=2, color='white'))
+                fig_f = px.line(forecast, x='ds', y='yhat', title="Prophet 1-Year Demand Projection")
+                fig_f.add_scatter(x=df_truth['ds'], y=df_truth['y'], mode='markers', name='Actuals', marker=dict(size=2, color='white'))
                 st.plotly_chart(fig_f, use_container_width=True)
-
 
 with tab4:
     st.header("Inventory Optimization Insights")
