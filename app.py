@@ -459,82 +459,82 @@ with tab2:
 
 # Placeholder layouts for future tabs
 with tab3:
-    st.header("🔮 Advanced AI Forecasting (Prophet)")
+    st.header("🧬 Stage 3: The Probability Truth (AI-Powered)")
     
-    # 1. Choose Source
-    f_source = st.radio("Select Source:", ("Simulate Trend/Seasonality", "Use Uploaded Data"), horizontal=True, key="f_src")
+    # 1. PARAMETERS
+    with st.container(border=True):
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            baseline = st.number_input("Baseline Demand", value=500.0)
+        with c2:
+            target_cov = st.number_input("Target CoV", value=0.15)
+        with c3:
+            surcharge = st.slider("Peak Surcharge %", 0, 100, 30)
+        with c4:
+            forecast_days = st.number_input("Days to Forecast", value=365)
 
-    df_prophet = None
-
-    if f_source == "Simulate Trend/Seasonality":
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            growth = st.slider("Growth Trend", -0.1, 0.1, 0.02, step=0.01)
-        with col2:
-            season_amp = st.slider("Seasonality Strength", 0, 50, 20)
-        with col3:
-            noise = st.slider("Noise Level", 1, 20, 5)
-
-        # Generate 2 years of daily data
-        dates = pd.date_range(start="2024-01-01", periods=730, freq='D')
-        t = np.arange(len(dates))
-        y = 100 + (growth * t) + (season_amp * np.sin(2 * np.pi * t / 365.25)) + np.random.normal(0, noise, len(dates))
-        
-        df_prophet = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y)})
+    # 2. PROPHET GENERATION LOGIC
+    # Create a synthetic timeline
+    dates = pd.date_range(start="2024-01-01", periods=730, freq='D')
     
-    else:
-        if 'uploaded_file' in locals() and uploaded_file is not None:
-            try:
-                # Prophet requires columns 'ds' (date) and 'y' (value)
-                raw = pd.read_excel(uploaded_file)
-                # Assuming the excel has 'Date' and 'Demand'
-                df_prophet = raw.rename(columns={'Date': 'ds', 'Demand': 'y'})
-                df_prophet['ds'] = pd.to_datetime(df_prophet['ds'])
-            except Exception as e:
-                st.error(f"Error: Ensure Excel has 'Date' and 'Demand' columns. {e}")
-        else:
-            st.warning("Please upload data in Tab 1 first.")
+    # Simulate a Prophet-friendly dataset
+    # We create a yearly sine wave to mimic seasonality
+    t = np.arange(len(dates))
+    seasonal_effect = np.sin(2 * np.pi * t / 365.25)
+    
+    # Define Low, Normal, High based on the seasonal wave
+    y = baseline + (seasonal_effect * (baseline * 0.4)) + np.random.normal(0, baseline * target_cov, len(dates))
+    
+    df_p = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y)})
+    
+    # Apply Surcharge to the 'High' parts of the wave
+    df_p.loc[df_p['y'] > (baseline * 1.2), 'y'] *= (1 + surcharge/100)
 
-    if df_prophet is not None:
-        st.divider()
-        
-        # 2. Model Training & Prediction
-        periods_to_forecast = st.number_input("Days to Forecast into Future:", min_value=7, max_value=365, value=90)
-        
-        m = Prophet(yearly_seasonality=True, weekly_seasonality=True, daily_seasonality=False)
-        m.fit(df_prophet)
-        
-        future = m.make_future_dataframe(periods=periods_to_forecast)
+    # Assign Labels for the Histogram Breakdown
+    def label_season(val):
+        if val > baseline * 1.3: return "High"
+        if val < baseline * 0.7: return "Low"
+        return "Normal"
+    
+    df_p['Seasonality'] = df_p['y'].apply(label_season)
+
+    # 3. STATISTICAL METRICS
+    st.divider()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Prophet Mean", f"{df_p['y'].mean():.1f}")
+    m2.metric("CoV Score", f"{(df_p['y'].std()/df_p['y'].mean()):.2f}")
+    m3.metric("Peak Days Count", len(df_p[df_p['Seasonality'] == "High"]))
+    m4.metric("Baseline", f"{baseline}")
+
+    # 4. THE VISUALS (Matching your Stage 3 Screenshots)
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("A. The General Histogram")
+        fig_gen = px.histogram(df_p, x="y", nbins=40, template="plotly_dark", color_discrete_sequence=['#4F8BF9'])
+        fig_gen.update_layout(bargap=0.1, xaxis_title="Demand Quantity")
+        st.plotly_chart(fig_gen, use_container_width=True)
+
+    with col_right:
+        st.subheader("B. The Seasonal Breakdown")
+        fig_sea = px.histogram(
+            df_p, x="y", color="Seasonality", nbins=40, 
+            template="plotly_dark",
+            color_discrete_map={"Normal": "#5B84B1", "High": "#FC766A", "Low": "#71918d"},
+            barmode='overlay'
+        )
+        fig_sea.update_layout(bargap=0.1, xaxis_title="Demand Quantity")
+        st.plotly_chart(fig_sea, use_container_width=True)
+
+    # 5. THE PROPHET FORECAST
+    with st.expander("🔮 View Prophet Future Forecast (Trend Line)"):
+        m = Prophet(yearly_seasonality=True)
+        m.fit(df_p)
+        future = m.make_future_dataframe(periods=forecast_days)
         forecast = m.predict(future)
-
-        # 3. Visualization
-        st.subheader("Forecast Results")
-        fig_f = go.Figure()
-
-        # Actuals
-        fig_f.add_trace(go.Scatter(x=df_prophet['ds'], y=df_prophet['y'], mode='markers', name='Actual Demand', marker=dict(color='black', size=4)))
-        # Trend / Forecast
-        fig_f.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='AI Forecast', line=dict(color='#4F8BF9', width=3)))
-        # Uncertainty Interval
-        fig_f.add_trace(go.Scatter(
-            x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
-            y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
-            fill='toself', fillcolor='rgba(79, 139, 249, 0.2)', line=dict(color='rgba(255,255,255,0)'),
-            name='Uncertainty Range'
-        ))
-
-        fig_f.update_layout(template="plotly_white", xaxis_title="Date", yaxis_title="Demand Quantity")
-        st.plotly_chart(fig_f, use_container_width=True)
-
-        # 4. Decomposition
-        with st.expander("View Forecast Components (Trend & Seasonality)"):
-            st.write("Prophet breaks down demand into three distinct layers:")
-            # Prophet has a built-in plotting tool for components, but we'll show them as metrics
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Long-term Trend:** Shows if your business is growing or shrinking.")
-            with c2:
-                st.markdown("**Weekly/Yearly Patterns:** Shows 'Peak' days and months.")
+        
+        fig_forecast = px.line(forecast, x='ds', y='yhat', title="AI-Predicted Demand Trend")
+        st.plotly_chart(fig_forecast, use_container_width=True)
 
 with tab4:
     st.header("Inventory Optimization Insights")
