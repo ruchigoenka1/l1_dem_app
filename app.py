@@ -459,82 +459,104 @@ with tab2:
 
 # Placeholder layouts for future tabs
 with tab3:
-    st.header("🧬 Stage 3: The Probability Truth (AI-Powered)")
+    st.header("🧬 Stage 3: The Probability Truth")
     
-    # 1. PARAMETERS
+    # --- 1. CONFIGURATION ---
     with st.container(border=True):
-        c1, c2, c3, c4 = st.columns(4)
+        st.subheader("🛠️ Model Inputs")
+        c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
-            baseline = st.number_input("Baseline Demand", value=500.0)
+            level = st.number_input("Level (Starting Point)", value=100.0)
         with c2:
-            target_cov = st.number_input("Target CoV", value=0.15)
+            baseline = st.number_input("Average Growth/Base", value=400.0)
         with c3:
-            surcharge = st.slider("Peak Surcharge %", 0, 100, 30)
+            target_cov = st.number_input("Target CoV", value=0.15)
         with c4:
+            surcharge = st.slider("Peak Surcharge %", 0, 100, 30)
+        with c5:
             forecast_days = st.number_input("Days to Forecast", value=365)
 
-    # 2. PROPHET GENERATION LOGIC
-    # Create a synthetic timeline
+    # --- 2. DATA GENERATION (Using Level & Seasonality) ---
     dates = pd.date_range(start="2024-01-01", periods=730, freq='D')
-    
-    # Simulate a Prophet-friendly dataset
-    # We create a yearly sine wave to mimic seasonality
     t = np.arange(len(dates))
-    seasonal_effect = np.sin(2 * np.pi * t / 365.25)
     
-    # Define Low, Normal, High based on the seasonal wave
-    y = baseline + (seasonal_effect * (baseline * 0.4)) + np.random.normal(0, baseline * target_cov, len(dates))
+    # Combine Level + Seasonal Wave + Noise
+    # The 'Level' acts as the constant intercept
+    seasonal_wave = np.sin(2 * np.pi * t / 365.25)
+    raw_y = level + baseline + (seasonal_wave * (baseline * 0.5)) + np.random.normal(0, baseline * target_cov, len(dates))
     
-    df_p = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y)})
+    df_p = pd.DataFrame({'ds': dates, 'y': np.maximum(0, raw_y)})
     
-    # Apply Surcharge to the 'High' parts of the wave
-    df_p.loc[df_p['y'] > (baseline * 1.2), 'y'] *= (1 + surcharge/100)
+    # Apply Peak Surcharge logic
+    df_p.loc[df_p['y'] > (level + baseline * 1.2), 'y'] *= (1 + surcharge/100)
 
-    # Assign Labels for the Histogram Breakdown
-    def label_season(val):
-        if val > baseline * 1.3: return "High"
-        if val < baseline * 0.7: return "Low"
+    # Categorize Seasons
+    def get_season(val):
+        if val > (level + baseline) * 1.3: return "High"
+        if val < (level + baseline) * 0.7: return "Low"
         return "Normal"
     
-    df_p['Seasonality'] = df_p['y'].apply(label_season)
+    df_p['Seasonality'] = df_p['y'].apply(get_season)
 
-    # 3. STATISTICAL METRICS
+    # --- 3. SEASONAL PERFORMANCE TABLE ---
     st.divider()
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Prophet Mean", f"{df_p['y'].mean():.1f}")
-    m2.metric("CoV Score", f"{(df_p['y'].std()/df_p['y'].mean()):.2f}")
-    m3.metric("Peak Days Count", len(df_p[df_p['Seasonality'] == "High"]))
-    m4.metric("Baseline", f"{baseline}")
+    st.subheader("📊 Seasonal Performance Metrics")
+    
+    # Grouping data to show Avg and CoV per Season
+    seasonal_summary = df_p.groupby('Seasonality')['y'].agg(['mean', 'std', 'count']).reset_index()
+    seasonal_summary['CoV'] = (seasonal_summary['std'] / seasonal_summary['mean']).round(3)
+    seasonal_summary.columns = ['Season', 'Avg Demand', 'Std Dev', 'Count (Days)', 'CoV']
+    
+    # Displaying metrics in columns for quick glance
+    cols = st.columns(len(seasonal_summary))
+    for i, row in seasonal_summary.iterrows():
+        cols[i].metric(
+            label=f"{row['Season']} Season Avg", 
+            value=f"{row['Avg Demand']:.1f}", 
+            delta=f"CoV: {row['CoV']}", 
+            delta_color="inverse" if row['CoV'] > 0.2 else "normal"
+        )
 
-    # 4. THE VISUALS (Matching your Stage 3 Screenshots)
+    st.table(seasonal_summary[['Season', 'Avg Demand', 'CoV', 'Count (Days)']])
+
+    # --- 4. VISUALS (Match Screenshots) ---
     col_left, col_right = st.columns(2)
     
     with col_left:
-        st.subheader("A. The General Histogram")
+        st.subheader("A. General Distribution")
         fig_gen = px.histogram(df_p, x="y", nbins=40, template="plotly_dark", color_discrete_sequence=['#4F8BF9'])
-        fig_gen.update_layout(bargap=0.1, xaxis_title="Demand Quantity")
+        fig_gen.update_layout(bargap=0.1, xaxis_title="Demand")
         st.plotly_chart(fig_gen, use_container_width=True)
 
     with col_right:
-        st.subheader("B. The Seasonal Breakdown")
+        st.subheader("B. Seasonal Breakdown")
         fig_sea = px.histogram(
             df_p, x="y", color="Seasonality", nbins=40, 
             template="plotly_dark",
             color_discrete_map={"Normal": "#5B84B1", "High": "#FC766A", "Low": "#71918d"},
             barmode='overlay'
         )
-        fig_sea.update_layout(bargap=0.1, xaxis_title="Demand Quantity")
+        fig_sea.update_layout(bargap=0.1, xaxis_title="Demand")
         st.plotly_chart(fig_sea, use_container_width=True)
 
-    # 5. THE PROPHET FORECAST
-    with st.expander("🔮 View Prophet Future Forecast (Trend Line)"):
+    # --- 5. DATA TABLE & PROPHET ---
+    st.divider()
+    t_col1, t_col2 = st.columns([1, 1])
+    
+    with t_col1:
+        st.subheader("📂 Generated Data Table")
+        st.dataframe(df_p[['ds', 'y', 'Seasonality']], use_container_width=True, height=300)
+    
+    with t_col2:
+        st.subheader("🔮 Prophet Trend Projection")
         m = Prophet(yearly_seasonality=True)
         m.fit(df_p)
         future = m.make_future_dataframe(periods=forecast_days)
         forecast = m.predict(future)
-        
-        fig_forecast = px.line(forecast, x='ds', y='yhat', title="AI-Predicted Demand Trend")
+        fig_forecast = px.line(forecast, x='ds', y='yhat', color_discrete_sequence=['#FF4B4B'])
         st.plotly_chart(fig_forecast, use_container_width=True)
+
+
 
 with tab4:
     st.header("Inventory Optimization Insights")
