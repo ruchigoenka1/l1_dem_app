@@ -460,6 +460,7 @@ with tab2:
 # Placeholder layouts for future tabs
 with tab3:
     st.header("🧬 Stage 3: The Probability Truth")
+    st.markdown("Analyze historical patterns, simulate growth, and project future demand with AI uncertainty bands.")
     
     # --- 1. DATA SOURCE & SAMPLE DOWNLOAD ---
     col_header, col_download = st.columns([2, 1])
@@ -467,8 +468,10 @@ with tab3:
         data_mode = st.radio("Data Mode:", ("Simulation", "Upload Data"), horizontal=True, key="mode_t3")
     
     with col_download:
+        # Create a sample template with growth and seasonality
         sample_dates = pd.date_range(start="2024-01-01", periods=365, freq='D')
-        sample_y = 500 + (10 * np.arange(365)/30) + np.random.normal(0, 50, 365)
+        t_sample = np.arange(365)
+        sample_y = 500 + (15 * t_sample/30) + (50 * np.sin(2 * np.pi * t_sample / 30)) + np.random.normal(0, 30, 365)
         sample_df = pd.DataFrame({'Date': sample_dates, 'Demand': np.maximum(0, sample_y).astype(int)})
         
         buffer = io.BytesIO()
@@ -476,8 +479,10 @@ with tab3:
             sample_df.to_excel(writer, index=False)
         
         st.download_button(
-            label="📥 Download Template.xlsx",
-            data=buffer.getvalue(), file_name="demand_template.xlsx", mime="application/vnd.ms-excel"
+            label="📥 Download Workshop Template.xlsx",
+            data=buffer.getvalue(),
+            file_name="demand_template.xlsx",
+            mime="application/vnd.ms-excel"
         )
 
     df_truth = None
@@ -486,8 +491,8 @@ with tab3:
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns(4)
             with c1:
-                level = st.number_input("Base Level", value=100.0)
-                growth = st.number_input("Annual Growth %", value=10.0)
+                level = st.number_input("Base Level (Start)", value=100.0)
+                growth = st.number_input("Annual Growth %", value=15.0) # Increased for visible 'cone'
             with c2:
                 base_amp = st.number_input("Amplitude", value=400.0)
                 target_cov = st.number_input("Target CoV", value=0.15)
@@ -496,95 +501,98 @@ with tab3:
             with c4:
                 forecast_days = st.number_input("Forecast Horizon (Days)", value=365)
 
-        # Simulation Logic
+        # SIMULATION GENERATION
         dates = pd.date_range(start="2023-01-01", periods=730, freq='D')
         t = np.arange(len(dates))
         growth_factor = (1 + growth/100) ** (t / 365)
         seasonal_wave = np.sin(2 * np.pi * t / 365.25)
-        y_vals = (level + base_amp + (seasonal_wave * (base_amp * 0.5))) * growth_factor
+        
+        baseline_calc = level + base_amp
+        y_vals = (baseline_calc + (seasonal_wave * (base_amp * 0.5))) * growth_factor
         y_vals += np.random.normal(0, (base_amp * target_cov), len(dates))
+        
         df_truth = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y_vals)})
         
-        # Seasonality Labeling
-        high_t = (level + base_amp) * 1.25
-        low_t = (level + base_amp) * 0.75
+        # Labeling and Surcharge
+        high_t = baseline_calc * 1.25
+        low_t = baseline_calc * 0.75
         df_truth.loc[df_truth['y'] > high_t, 'y'] *= (1 + surcharge/100)
         df_truth['Seasonality'] = df_truth['y'].apply(lambda x: 'High' if x > high_t else ('Low' if x < low_t else 'Normal'))
 
     else:
         uploaded_file = st.file_uploader("Upload xlsx", type=["xlsx"], key="up_t3")
-        forecast_days = st.number_input("Forecast Horizon (Days)", value=90)
+        forecast_days = st.number_input("Forecast Horizon (Days)", value=180)
         if uploaded_file:
             df_truth = pd.read_excel(uploaded_file).rename(columns={'Date':'ds', 'Demand':'y'})
             df_truth['ds'] = pd.to_datetime(df_truth['ds'])
             q1, q3 = df_truth['y'].quantile([0.25, 0.75])
             df_truth['Seasonality'] = df_truth['y'].apply(lambda x: 'High' if x > q3 else ('Low' if x < q1 else 'Normal'))
 
+    # --- 2. THE SEASONAL METRICS MATRIX ---
     if df_truth is not None:
-        # 2. METRICS & HISTOGRAMS (Keeping your requested layout)
         st.divider()
-        matrix = df_truth.groupby('Seasonality')['y'].agg(['mean', 'std', 'count']).reset_index()
+        st.subheader("📊 The Seasonal Metrics Matrix")
+        
+        # Calculate stats
+        matrix = df_truth.groupby('Seasonality')['y'].agg(['mean', 'std', 'min', 'max', 'count']).reset_index()
         matrix['CoV'] = (matrix['std'] / matrix['mean']).round(3)
-        st.subheader("📊 Seasonal Metrics Matrix")
-        st.dataframe(matrix.style.background_gradient(subset=['CoV'], cmap='RdYlGn_r'), use_container_width=True)
+        matrix.columns = ['Season', 'Avg Demand', 'Std Dev', 'Min', 'Max', 'Days Count', 'CoV']
+        
+        # Display styled table
+        st.dataframe(
+            matrix.style.background_gradient(subset=['CoV'], cmap='RdYlGn_r').format(precision=2),
+            use_container_width=True, hide_index=True
+        )
 
-        cl, cr = st.columns(2)
-        with cl:
-            st.plotly_chart(px.histogram(df_truth, x="y", title="Overall Distribution", template="plotly_dark"), use_container_width=True)
-        with cr:
-            fig_s = px.histogram(df_truth, x="y", color="Seasonality", barmode='overlay', template="plotly_dark",
+        # --- 3. DUAL HISTOGRAMS ---
+        col_l, col_r = st.columns(2)
+        with col_l:
+            st.plotly_chart(px.histogram(df_truth, x="y", title="A. General Distribution", template="plotly_dark", nbins=40), use_container_width=True)
+        with col_r:
+            fig_s = px.histogram(df_truth, x="y", color="Seasonality", title="B. Seasonal Breakdown", template="plotly_dark", barmode='overlay',
                                  color_discrete_map={"Normal": "#5B84B1", "High": "#FC766A", "Low": "#71918d"})
             st.plotly_chart(fig_s, use_container_width=True)
 
-        # 3. PROPHET FORECAST WITH UNCERTAINTY INTERVALS
+        # --- 4. PROPHET FORECAST (With Broadening Uncertainty) ---
         st.divider()
-        st.subheader("🔮 AI Prophet Forecast with Uncertainty Bands")
+        st.subheader("🔮 AI Prophet Forecast (Trend & Uncertainty)")
         
         with st.spinner("AI training and calculating risk bands..."):
-            m = Prophet(interval_width=0.95, yearly_seasonality=True, weekly_seasonality=True)
+            # Changepoint_prior_scale=0.5 makes the uncertainty cone widen significantly
+            m = Prophet(interval_width=0.95, yearly_seasonality=True, weekly_seasonality=True, changepoint_prior_scale=0.5)
             m.fit(df_truth)
+            
             future = m.make_future_dataframe(periods=int(forecast_days))
             forecast = m.predict(future)
             
-            # --- CUSTOM PLOT FOR UNCERTAINTY INTERVALS ---
             fig_f = go.Figure()
 
-            # Shaded Uncertainty Area (Upper and Lower Bounds)
+            # The broadening Uncertainty Ribbon
             fig_f.add_trace(go.Scatter(
                 x=pd.concat([forecast['ds'], forecast['ds'][::-1]]),
                 y=pd.concat([forecast['yhat_upper'], forecast['yhat_lower'][::-1]]),
-                fill='toself',
-                fillcolor='rgba(150, 150, 150, 0.2)', # Grey Shading
-                line=dict(color='rgba(255,255,255,0)'),
-                hoverinfo="skip",
-                showlegend=True,
+                fill='toself', fillcolor='rgba(100, 100, 100, 0.3)', line=dict(color='rgba(255,255,255,0)'),
                 name='Uncertainty Interval (95%)'
             ))
 
-            # Predicted Line (yhat)
-            fig_f.add_trace(go.Scatter(
-                x=forecast['ds'], y=forecast['yhat'],
-                line=dict(color='#4F8BF9', width=3),
-                name='AI Forecast'
-            ))
+            # AI Prediction Line
+            fig_f.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], line=dict(color='#4F8BF9', width=3), name='AI Forecast'))
 
-            # Actual Data Points
-            fig_f.add_trace(go.Scatter(
-                x=df_truth['ds'], y=df_truth['y'],
-                mode='markers',
-                marker=dict(color='white', size=3),
-                name='Actual Data'
-            ))
+            # Actual Historical Points
+            fig_f.add_trace(go.Scatter(x=df_truth['ds'], y=df_truth['y'], mode='markers', marker=dict(color='white', size=2), name='Actual Data'))
 
             fig_f.update_layout(
                 template="plotly_dark",
-                yaxis=dict(range=[0, forecast['yhat_upper'].max() * 1.1]),
-                xaxis_title="Date",
-                yaxis_title="Demand Quantity",
+                title=f"Prophet Projection for {forecast_days} Days",
+                yaxis=dict(range=[0, forecast['yhat_upper'].max() * 1.1]), # Force Y-axis to start at 0
+                xaxis_title="Date", yaxis_title="Demand Quantity",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             
             st.plotly_chart(fig_f, use_container_width=True)
+            
+        with st.expander("📂 View Raw Data Table"):
+            st.dataframe(df_truth, use_container_width=True)
 
 with tab4:
     st.header("Inventory Optimization Insights")
