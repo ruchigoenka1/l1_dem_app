@@ -461,101 +461,104 @@ with tab2:
 with tab3:
     st.header("🧬 Stage 3: The Probability Truth")
     
-    # --- 1. CONFIGURATION ---
-    with st.container(border=True):
-        st.subheader("🛠️ Model Inputs")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        with c1:
-            level = st.number_input("Level (Starting Point)", value=100.0)
-        with c2:
-            baseline = st.number_input("Average Growth/Base", value=400.0)
-        with c3:
-            target_cov = st.number_input("Target CoV", value=0.15)
-        with c4:
-            surcharge = st.slider("Peak Surcharge %", 0, 100, 30)
-        with c5:
-            forecast_days = st.number_input("Days to Forecast", value=365)
+    # --- 1. DATA SOURCE SELECTION ---
+    data_mode = st.radio("Select Data Mode:", ("Simulate Scenarios", "Upload Real Data"), horizontal=True)
+    
+    df_workshop = None
 
-    # --- 2. DATA GENERATION (Using Level & Seasonality) ---
-    dates = pd.date_range(start="2024-01-01", periods=730, freq='D')
-    t = np.arange(len(dates))
-    
-    # Combine Level + Seasonal Wave + Noise
-    # The 'Level' acts as the constant intercept
-    seasonal_wave = np.sin(2 * np.pi * t / 365.25)
-    raw_y = level + baseline + (seasonal_wave * (baseline * 0.5)) + np.random.normal(0, baseline * target_cov, len(dates))
-    
-    df_p = pd.DataFrame({'ds': dates, 'y': np.maximum(0, raw_y)})
-    
-    # Apply Peak Surcharge logic
-    df_p.loc[df_p['y'] > (level + baseline * 1.2), 'y'] *= (1 + surcharge/100)
+    if data_mode == "Simulate Scenarios":
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                level = st.number_input("Base Level", value=100.0)
+                growth = st.number_input("Growth Trend (per year %)", value=5.0) 
+            with c2:
+                base_amp = st.number_input("Base Amplitude", value=400.0)
+                target_cov = st.number_input("Target CoV", value=0.15)
+            with c3:
+                surcharge = st.slider("Peak Surcharge %", 0, 100, 30)
+            with c4:
+                forecast_days = st.number_input("Days to Forecast", value=365)
 
-    # Categorize Seasons
-    def get_season(val):
-        if val > (level + baseline) * 1.3: return "High"
-        if val < (level + baseline) * 0.7: return "Low"
-        return "Normal"
-    
-    df_p['Seasonality'] = df_p['y'].apply(get_season)
+        # GENERATION LOGIC
+        dates = pd.date_range(start="2023-01-01", periods=730, freq='D')
+        t = np.arange(len(dates))
+        growth_factor = (1 + growth/100) ** (t / 365)
+        seasonal_wave = np.sin(2 * np.pi * t / 365.25)
+        
+        y_vals = (level + base_amp + (seasonal_wave * (base_amp * 0.5))) * growth_factor
+        y_vals += np.random.normal(0, (base_amp * target_cov), len(dates))
+        
+        df_workshop = pd.DataFrame({'ds': dates, 'y': np.maximum(0, y_vals)})
+        
+        # Apply Surcharge and Labels
+        threshold_val = (level + base_amp) * 1.2
+        df_workshop.loc[df_workshop['y'] > threshold_val, 'y'] *= (1 + surcharge/100)
 
-    # --- 3. SEASONAL PERFORMANCE TABLE ---
-    st.divider()
-    st.subheader("📊 Seasonal Performance Metrics")
-    
-    # Grouping data to show Avg and CoV per Season
-    seasonal_summary = df_p.groupby('Seasonality')['y'].agg(['mean', 'std', 'count']).reset_index()
-    seasonal_summary['CoV'] = (seasonal_summary['std'] / seasonal_summary['mean']).round(3)
-    seasonal_summary.columns = ['Season', 'Avg Demand', 'Std Dev', 'Count (Days)', 'CoV']
-    
-    # Displaying metrics in columns for quick glance
-    cols = st.columns(len(seasonal_summary))
-    for i, row in seasonal_summary.iterrows():
-        cols[i].metric(
-            label=f"{row['Season']} Season Avg", 
-            value=f"{row['Avg Demand']:.1f}", 
-            delta=f"CoV: {row['CoV']}", 
-            delta_color="inverse" if row['CoV'] > 0.2 else "normal"
-        )
+    else:
+        uploaded_file_t3 = st.file_uploader("Upload Historical Demand (.xlsx)", type=["xlsx"], key="t3_uploader")
+        forecast_days = st.number_input("Days to Forecast into Future", value=90)
+        
+        if uploaded_file_t3:
+            try:
+                raw_df = pd.read_excel(uploaded_file_t3)
+                # Expecting 'Date' and 'Demand' columns
+                df_workshop = raw_df.rename(columns={'Date': 'ds', 'Demand': 'y'})
+                df_workshop['ds'] = pd.to_datetime(df_workshop['ds'])
+                st.success("File uploaded successfully!")
+            except Exception as e:
+                st.error(f"Error: Ensure file has 'Date' and 'Demand' columns. {e}")
+        else:
+            st.info("Awaiting Excel upload...")
 
-    st.table(seasonal_summary[['Season', 'Avg Demand', 'CoV', 'Count (Days)']])
+    # --- 2. ANALYSIS (ONLY RUN IF DATA EXISTS) ---
+    if df_workshop is not None:
+        # Dynamic Labeling for Seasonal Breakdown
+        q1, q3 = df_workshop['y'].quantile([0.25, 0.75])
+        def auto_label(val):
+            if val > q3: return "High"
+            if val < q1: return "Low"
+            return "Normal"
+        df_workshop['Seasonality'] = df_workshop['y'].apply(auto_label)
 
-    # --- 4. VISUALS (Match Screenshots) ---
-    col_left, col_right = st.columns(2)
-    
-    with col_left:
-        st.subheader("A. General Distribution")
-        fig_gen = px.histogram(df_p, x="y", nbins=40, template="plotly_dark", color_discrete_sequence=['#4F8BF9'])
-        fig_gen.update_layout(bargap=0.1, xaxis_title="Demand")
-        st.plotly_chart(fig_gen, use_container_width=True)
+        # --- 3. METRICS ---
+        st.divider()
+        seasonal_summary = df_workshop.groupby('Seasonality')['y'].agg(['mean', 'std', 'count']).reset_index()
+        seasonal_summary['CoV'] = (seasonal_summary['std'] / seasonal_summary['mean']).round(3)
+        
+        m_cols = st.columns(3)
+        for i, season in enumerate(["Low", "Normal", "High"]):
+            row = seasonal_summary[seasonal_summary['Seasonality'] == season].iloc[0]
+            m_cols[i].metric(f"{season} Season Avg", f"{row['mean']:.1f}", f"CoV: {row['CoV']}")
 
-    with col_right:
-        st.subheader("B. Seasonal Breakdown")
-        fig_sea = px.histogram(
-            df_p, x="y", color="Seasonality", nbins=40, 
-            template="plotly_dark",
-            color_discrete_map={"Normal": "#5B84B1", "High": "#FC766A", "Low": "#71918d"},
-            barmode='overlay'
-        )
-        fig_sea.update_layout(bargap=0.1, xaxis_title="Demand")
-        st.plotly_chart(fig_sea, use_container_width=True)
+        # --- 4. VISUALS (Histograms) ---
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.subheader("General Distribution")
+            st.plotly_chart(px.histogram(df_workshop, x="y", nbins=40, template="plotly_dark"), use_container_width=True)
+        with c_right:
+            st.subheader("Seasonal Breakdown")
+            fig_sea = px.histogram(df_workshop, x="y", color="Seasonality", nbins=40, template="plotly_dark",
+                                   color_discrete_map={"Normal": "#5B84B1", "High": "#FC766A", "Low": "#71918d"}, barmode='overlay')
+            st.plotly_chart(fig_sea, use_container_width=True)
 
-    # --- 5. DATA TABLE & PROPHET ---
-    st.divider()
-    t_col1, t_col2 = st.columns([1, 1])
-    
-    with t_col1:
-        st.subheader("📂 Generated Data Table")
-        st.dataframe(df_p[['ds', 'y', 'Seasonality']], use_container_width=True, height=300)
-    
-    with t_col2:
-        st.subheader("🔮 Prophet Trend Projection")
-        m = Prophet(yearly_seasonality=True)
-        m.fit(df_p)
-        future = m.make_future_dataframe(periods=forecast_days)
-        forecast = m.predict(future)
-        fig_forecast = px.line(forecast, x='ds', y='yhat', color_discrete_sequence=['#FF4B4B'])
-        st.plotly_chart(fig_forecast, use_container_width=True)
-
+        # --- 5. DATA TABLE & PROPHET ---
+        st.divider()
+        d_tab, f_tab = st.tabs(["Raw Data Table", "AI Prophet Forecast"])
+        
+        with d_tab:
+            st.dataframe(df_workshop, use_container_width=True)
+            
+        with f_tab:
+            with st.spinner("AI is training on your data..."):
+                m = Prophet(yearly_seasonality=True, weekly_seasonality=True)
+                m.fit(df_workshop)
+                future = m.make_future_dataframe(periods=int(forecast_days))
+                forecast = m.predict(future)
+                
+                fig_f = px.line(forecast, x='ds', y='yhat', title="Prophet Projection")
+                fig_f.add_scatter(x=df_workshop['ds'], y=df_workshop['y'], mode='markers', name='Actuals', marker=dict(size=2, color='white'))
+                st.plotly_chart(fig_f, use_container_width=True)
 
 
 with tab4:
