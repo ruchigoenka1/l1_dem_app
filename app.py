@@ -641,21 +641,23 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: SUPPLY CHAIN ENGINE (WITH L+1 MORNING ARRIVAL LOGIC)
+    # SECTION 2: SUPPLY CHAIN ENGINE WITH BACKLOG CLEARING LOGIC
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
             'Day', 'Opening Inventory', 'Received Morning', 'Demand Generated', 
-            'Sales Met', 'Shortage', 'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
+            'Sales Met', 'Shortage', 'Unfulfilled Backlog', 'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
         ])
         st.session_state.t4_day_counter = 0
         st.session_state.t4_current_inv = starting_inventory
+        st.session_state.t4_backlog = 0  # Dynamic tracker for persistent backlogs
         st.session_state.t4_pipeline_orders = [] 
 
     def run_simulation_steps(num_days):
         history_df = st.session_state.t4_history.copy()
         day_counter = st.session_state.t4_day_counter
         current_inv = st.session_state.t4_current_inv
+        backlog = st.session_state.t4_backlog
         pipeline_orders = list(st.session_state.t4_pipeline_orders)
         
         rng = np.random.RandomState()
@@ -664,40 +666,48 @@ with tab4:
         for _ in range(num_days):
             day_counter += 1
             
-            # A) MORNING PHASE: Check for arrivals scheduled for this morning
-            # If placed on Day T, it arrives on morning of T + Lead Time + 1
+            # 1. MORNING PHASE: Process incoming shipments and clear existing backlog first
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
-            
-            # Add to physical inventory immediately at start of day
-            opening_inv = current_inv + arriving_qty
-            
-            # Remove arrived items from the pipeline tracking list
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # B) DAYTIME PHASE: Generate dynamic demand
+            if arriving_qty > 0:
+                if backlog > 0:
+                    if arriving_qty >= backlog:
+                        arriving_qty -= backlog
+                        backlog = 0
+                    else:
+                        backlog -= arriving_qty
+                        arriving_qty = 0
+                current_inv += arriving_qty
+            
+            opening_inv = current_inv
+            
+            # 2. DAYTIME PHASE: Generate dynamic demand
             if dist_type == "Normal":
                 demand = max(0, int(rng.normal(float(avg_demand), float(std_dev))))
             else:
                 demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
             
-            # Fulfill client demand
-            if opening_inv >= demand:
+            # Fulfill client demand against available stock
+            total_needed = demand + backlog
+            if opening_inv >= total_needed:
                 sales_met = demand
                 shortage = 0
-                closing_inv = opening_inv - demand
+                backlog = 0
+                closing_inv = opening_inv - total_needed
             else:
-                sales_met = opening_inv
-                shortage = demand - opening_inv
+                sales_met = max(0, opening_inv - backlog)
+                shortage = total_needed - opening_inv
+                backlog = total_needed - opening_inv
                 closing_inv = 0
                 
-            # C) EVENING PHASE: Calculate Inventory Position and place orders if needed
+            # 3. EVENING PHASE: Evaluate inventory position (On-Hand + Pipeline - Backlog)
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
-            inventory_position = closing_inv + pipeline_qty
+            inventory_position = closing_inv + pipeline_qty - backlog
             
             order_placed_tonight = 0
             if inventory_position <= reorder_point:
                 order_placed_tonight = order_qty
-                # Set target delivery day to: Current Day + Lead Time + 1 Day morning
                 target_delivery = day_counter + lead_time + 1
                 pipeline_orders.append({'delivery_day': target_delivery, 'qty': order_qty})
                 pipeline_status = f"Placed Order (Arriving Day {target_delivery} Morning)"
@@ -708,12 +718,13 @@ with tab4:
 
             new_records.append({
                 'Day': day_counter,
-                'Opening Inventory': current_inv,      # Stock left over from yesterday evening
-                'Received Morning': arriving_qty,      # Stock added before business hours
+                'Opening Inventory': opening_inv,
+                'Received Morning': arriving_qty,
                 'Demand Generated': demand,
                 'Sales Met': sales_met,
                 'Shortage': shortage,
-                'Closing Inventory': closing_inv,      # Stock remaining at close of business
+                'Unfulfilled Backlog': backlog,
+                'Closing Inventory': closing_inv,
                 'Order Placed Evening': order_placed_tonight,
                 'Pipeline Status': pipeline_status
             })
@@ -726,15 +737,17 @@ with tab4:
             
         st.session_state.t4_day_counter = day_counter
         st.session_state.t4_current_inv = current_inv
+        st.session_state.t4_backlog = backlog
         st.session_state.t4_pipeline_orders = pipeline_orders
 
     if st.button("🔄 Reset Simulation Data", key="t4_reset_btn"):
         st.session_state.t4_history = pd.DataFrame(columns=[
             'Day', 'Opening Inventory', 'Received Morning', 'Demand Generated', 
-            'Sales Met', 'Shortage', 'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
+            'Sales Met', 'Shortage', 'Unfulfilled Backlog', 'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
         ])
         st.session_state.t4_day_counter = 0
         st.session_state.t4_current_inv = starting_inventory
+        st.session_state.t4_backlog = 0
         st.session_state.t4_pipeline_orders = []
         st.rerun()
 
@@ -756,7 +769,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & TIMELINE LEDGERS
+    # SECTION 4: VISUALIZATIONS WITH UPDATED Y-AXIS SHIFT LOGIC
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -788,10 +801,14 @@ with tab4:
 
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
+            
+            # Create a combined visualization line: drops below zero if a backlog forms
+            net_inventory_curve = df['Closing Inventory'] - df['Unfulfilled Backlog']
+            
             fig_inv = go.Figure()
             fig_inv.add_trace(go.Scatter(
-                x=df['Day'], y=df['Closing Inventory'],
-                mode='lines+markers', name='Closing Inventory',
+                x=df['Day'], y=net_inventory_curve,
+                mode='lines+markers', name='Net Inventory State',
                 line=dict(color='#3A96FF', width=2.5, shape='spline'),
                 marker=dict(size=5, color='#3A96FF'),
                 fill='tozeroy', fillcolor='rgba(58, 150, 255, 0.1)'
@@ -801,7 +818,18 @@ with tab4:
                 mode='lines', name='Reorder Point Target (ROP)',
                 line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
-            fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            
+            # Anchor Y-axis lower bounds dynamically to clearly show backlog depth
+            lowest_point = min(net_inventory_curve.min() - 20, -20)
+            highest_point = max(df['Closing Inventory'].max() + 20, reorder_point + 20)
+            
+            fig_inv.update_layout(
+                **shared_layout,
+                xaxis_title="Day",
+                yaxis_title="Units State Balance",
+                yaxis=dict(range=[lowest_point, highest_point], showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)"),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
             st.plotly_chart(fig_inv, use_container_width=True)
 
         if dist_type == "Uniform":
@@ -845,17 +873,17 @@ with tab4:
                 })
             st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
 
-        # COLLAPSIBLE TABLE 2: Updated Operations Ledger with clear Morning/Evening Timeline split
+        # COLLAPSIBLE TABLE 2: Operations Ledger with explicit Backlog tracker column
         with st.expander("📋 View Full Operations Ledger History Log", expanded=False):
-            # Highlight timeline flow sorting latest days on top
             display_df = df.copy().sort_values(by='Day', ascending=False)
             st.dataframe(
                 display_df, 
                 use_container_width=True, 
                 hide_index=True,
                 column_config={
-                    "Opening Inventory": st.column_config.NumberColumn("Opening Stock (Evening Prior)"),
+                    "Opening Inventory": st.column_config.NumberColumn("Opening Stock"),
                     "Received Morning": st.column_config.NumberColumn("☀️ Arrived Morning"),
+                    "Unfulfilled Backlog": st.column_config.NumberColumn("🚨 Unfulfilled Backlog", help="Accumulated unmet market demand"),
                     "Order Placed Evening": st.column_config.NumberColumn("🌙 Ordered Evening"),
                     "Closing Inventory": st.column_config.NumberColumn("Closing Stock")
                 }
