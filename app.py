@@ -618,7 +618,7 @@ with tab4:
         
     with col_cfg2:
         if dist_type == "Uniform":
-            variation = st.number_input("Variation (± From Average)", min_value=1, value=30, step=5, key="t4_variation")
+            variation = st.number_input("Variation (± From Average)", min_value=1, value=25, step=5, key="t4_variation")
             low_bound = max(0, avg_demand - variation)
             high_bound = avg_demand + variation
             std_dev = 0
@@ -656,7 +656,6 @@ with tab4:
         current_inv = st.session_state.t4_current_inv
         pipeline_orders = list(st.session_state.t4_pipeline_orders)
         
-        # Instantiate an unseeded, independent random state engine local to this function call
         rng = np.random.RandomState()
         new_records = []
 
@@ -664,18 +663,15 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
-            # Process incoming shipments arriving
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # Use the isolated local generator engine
             if dist_type == "Normal":
                 demand = max(0, int(rng.normal(float(avg_demand), float(std_dev))))
             else:
                 demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
             
-            # Fulfill demand
             if opening_inv >= demand:
                 sales_met = demand
                 shortage = 0
@@ -685,7 +681,6 @@ with tab4:
                 shortage = demand - opening_inv
                 closing_inv = 0
                 
-            # Pipeline Monitoring
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty
             
@@ -739,7 +734,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES
+    # SECTION 4: VISUALIZATIONS & AUTOMATED BALANCED BINS
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -787,12 +782,19 @@ with tab4:
             fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig_inv, use_container_width=True)
 
-        # Build clean, locked, integer-spaced buckets for Uniform distribution
+        # AUTOMATED PERFECT BALANCING ENGINE
         if dist_type == "Uniform":
-            step_size = 10
-            start_point = (low_bound // step_size) * step_size
-            end_point = ((high_bound // step_size) + 1) * step_size
-            breaks = np.arange(start_point, end_point + step_size, step_size)
+            total_elements = high_bound - low_bound + 1
+            # Dynamically look for a common factor (5, 10, or total span split) to keep bins clean
+            if total_elements % 5 == 0:
+                bin_size = 5
+            elif total_elements % 10 == 0:
+                bin_size = 10
+            else:
+                bin_size = max(1, total_elements // 5)
+            
+            # Pad the edges by exactly 0.5 to cleanly center whole integers inside the bins
+            breaks = np.arange(low_bound - 0.5, high_bound + 0.5 + bin_size, bin_size)
         else:
             breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
 
@@ -813,30 +815,31 @@ with tab4:
 
         st.markdown("---")
 
-        # COLLAPSIBLE TABLE 1: Distribution Share Table
+        # COLLAPSIBLE TABLE 1: Automated Balanced Data Table
         with st.expander("📊 View Distribution Bin Analysis Data Table", expanded=False):
             counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
-            total_elements = len(df)
+            total_elements_count = len(df)
             
             bin_records = []
             for i in range(len(counts)):
-                lower_lbl = int(edges[i])
-                upper_lbl = int(edges[i+1]) - 1
+                # Clean edge alignments back to pure integers for display labels
+                lower_lbl = int(np.ceil(edges[i]))
+                upper_lbl = int(np.floor(edges[i+1]))
                 
                 if dist_type == "Uniform" and (upper_lbl < low_bound or lower_lbl > high_bound):
                     continue
                     
-                pct_share = (counts[i] / total_elements) * 100
+                pct_share = (counts[i] / total_elements_count) * 100
                 
                 bin_records.append({
-                    "Demand Bracket Range": f"{max(low_bound, lower_lbl)} to {min(high_bound, upper_lbl)} units",
+                    "Demand Bracket Range": f"{lower_lbl} to {upper_lbl} units",
                     "Days Sampled (Count)": int(counts[i]),
                     "Distribution Share (%)": f"{pct_share:.1f}%"
                 })
                 
             st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
 
-        # COLLAPSIBLE TABLE 2: Operations Ledger History Table
+        # COLLAPSIBLE TABLE 2: Ledger
         with st.expander("📋 View Full Operations Ledger History Log", expanded=False):
             st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
 
