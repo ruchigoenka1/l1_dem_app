@@ -769,12 +769,11 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES
+    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES (FIXED KEYWORD ARG)
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
         
-        # CRITICAL PROTECTION: Injects fallback default values if older browser session state schemas are active
         if 'Unfulfilled Backlog' not in df.columns:
             df['Unfulfilled Backlog'] = 0
         
@@ -794,6 +793,7 @@ with tab4:
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
 
+        # Base properties for the layout dictionary footprint
         shared_layout = dict(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
@@ -806,7 +806,6 @@ with tab4:
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
             
-            # Net inventory curve drops below zero to accurately visualize backlog severity
             net_inventory_curve = df['Closing Inventory'] - df['Unfulfilled Backlog']
             
             fig_inv = go.Figure()
@@ -823,16 +822,19 @@ with tab4:
                 line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
             
-            lowest_point = min(net_inventory_curve.min() - 20, -20)
-            highest_point = max(df['Closing Inventory'].max() + 20, reorder_point + 20)
-            
+            # Apply base styling layout dictionary unpacking
             fig_inv.update_layout(
                 **shared_layout,
                 xaxis_title="Day",
                 yaxis_title="Units State Balance",
-                yaxis=dict(range=[lowest_point, highest_point], showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)"),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
+            
+            # FIXED MECHANISM: Update target axis updates safely via individual target modifier properties
+            lowest_point = min(net_inventory_curve.min() - 20, -20)
+            highest_point = max(df['Closing Inventory'].max() + 20, reorder_point + 20)
+            fig_inv.update_yaxes(range=[lowest_point, highest_point])
+            
             st.plotly_chart(fig_inv, use_container_width=True)
 
         # AUTOMATED PERFECT BALANCING ENGINE
