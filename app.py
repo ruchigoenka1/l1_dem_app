@@ -601,7 +601,7 @@ with tab3:
 with tab4:
     st.header("🎯 Tab 4: Safety Stock Simulation Game")
     st.markdown("""
-    **The Challenge:** Try running a business without stocking out! Balance the cost of holding inventory against the penalty of missing customer demand. 
+    **The Challenge:** Balance inventory holding costs against stockout penalties. Watch the graphs change dynamically as new random demand is generated daily!
     """)
 
     # =========================================================================
@@ -640,7 +640,7 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: CORE SIMULATION ENGINE
+    # SECTION 2: CORE SIMULATION ENGINE (FIXED STATE HANDLING)
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
@@ -651,25 +651,31 @@ with tab4:
         st.session_state.t4_pipeline_orders = [] 
 
     def run_simulation_steps(num_days):
-        history_list = st.session_state.t4_history.to_dict('records')
+        # Explicitly pull references from state
+        history_df = st.session_state.t4_history.copy()
         day_counter = st.session_state.t4_day_counter
         current_inv = st.session_state.t4_current_inv
-        pipeline_orders = st.session_state.t4_pipeline_orders
+        pipeline_orders = list(st.session_state.t4_pipeline_orders)
+        
+        new_records = []
 
         for _ in range(num_days):
             day_counter += 1
             opening_inv = current_inv
             
-            # Incoming shipments arriving
+            # Arriving shipments arriving
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
+            # CRITICAL FIX: Explicitly forcing fresh random generation detached from previous state cycles
             if dist_type == "Normal":
-                demand = max(0, int(np.random.normal(avg_demand, std_dev)))
+                demand = max(0, int(np.random.normal(float(avg_demand), float(std_dev))))
             else:
-                demand = int(np.random.randint(low_bound, high_bound + 1))
+                # Fresh, native random integer draw between low_bound and high_bound inclusive
+                demand = int(np.random.randint(int(low_bound), int(high_bound) + 1))
             
+            # Fulfill demand
             if opening_inv >= demand:
                 sales_met = demand
                 shortage = 0
@@ -679,6 +685,7 @@ with tab4:
                 shortage = demand - opening_inv
                 closing_inv = 0
                 
+            # Pipeline Monitoring
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty
             
@@ -690,14 +697,18 @@ with tab4:
             elif pipeline_qty > 0:
                 pipeline_status = f"{pipeline_qty} units en route"
 
-            history_list.append({
+            new_records.append({
                 'Day': day_counter, 'Opening Inventory': opening_inv, 'Demand Generated': demand,
                 'Sales Met': sales_met, 'Shortage': shortage, 'Closing Inventory': closing_inv,
                 'Pipeline Status': pipeline_status
             })
             current_inv = closing_inv
 
-        st.session_state.t4_history = pd.DataFrame(history_list)
+        # Concat new entries and explicitly save back to session state to trigger visual re-renders
+        if new_records:
+            new_df = pd.DataFrame(new_records)
+            st.session_state.t4_history = pd.concat([history_df, new_df], ignore_index=True)
+            
         st.session_state.t4_day_counter = day_counter
         st.session_state.t4_current_inv = current_inv
         st.session_state.t4_pipeline_orders = pipeline_orders
@@ -729,7 +740,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & LIVE BIN TABLES
+    # SECTION 4: VISUALIZATIONS & LIVE UPDATING BIN TABLES
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -777,17 +788,14 @@ with tab4:
             fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig_inv, use_container_width=True)
 
-        # FIXED LOGIC: Generate perfect, clean integer cuts for the bins based on current simulation logs
-        sim_min = int(df['Demand Generated'].min())
-        sim_max = int(df['Demand Generated'].max())
-        
+        # Build clean, locked, integer-spaced buckets for Uniform distribution
         if dist_type == "Uniform":
-            # Form clean, distinct integer boundaries across the true data spread
-            num_bins = 6
-            breaks = np.linspace(low_bound, high_bound, num_bins + 1)
+            step_size = 10
+            start_point = (low_bound // step_size) * step_size
+            end_point = ((high_bound // step_size) + 1) * step_size
+            breaks = np.arange(start_point, end_point + step_size, step_size)
         else:
-            num_bins = 7
-            breaks = np.linspace(sim_min, sim_max, num_bins + 1)
+            breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
 
         with col_graph2:
             st.markdown("**Generated Demand Distribution**")
@@ -804,21 +812,23 @@ with tab4:
             fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
-        # FIXED LOGIC: Dynamic distribution breakdown calculations update on every click
+        # Dynamic, fluid Distribution Analysis Table
         st.markdown("### 📊 Distribution Bin Analysis")
-        
-        # Calculate frequencies using clean, updated simulation runtime data
         counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
         total_elements = len(df)
         
         bin_records = []
         for i in range(len(counts)):
-            lower_lbl = int(np.round(edges[i]))
-            upper_lbl = int(np.round(edges[i+1]))
+            lower_lbl = int(edges[i])
+            upper_lbl = int(edges[i+1]) - 1
+            
+            if dist_type == "Uniform" and (upper_lbl < low_bound or lower_lbl > high_bound):
+                continue
+                
             pct_share = (counts[i] / total_elements) * 100
             
             bin_records.append({
-                "Demand Bracket Range": f"{lower_lbl} to {upper_lbl} units",
+                "Demand Bracket Range": f"{max(low_bound, lower_lbl)} to {min(high_bound, upper_lbl)} units",
                 "Days Sampled (Count)": int(counts[i]),
                 "Distribution Share (%)": f"{pct_share:.1f}%"
             })
