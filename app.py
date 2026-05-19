@@ -606,7 +606,7 @@ with tab4:
     """)
 
     # =========================================================================
-    # SECTION 1: DATA CONFIGURATION 
+    # SECTION 1: DATA CONFIGURATION (UPDATED FOR 0 DEFAULT VARIATION)
     # =========================================================================
     st.markdown("### 1. Data Configuration")
     
@@ -619,12 +619,14 @@ with tab4:
         
     with col_cfg2:
         if dist_type == "Uniform":
-            variation = st.number_input("Variation (± From Average)", min_value=1, value=25, step=5, key="t4_variation")
+            # Changed min_value to 0 and default value to 0
+            variation = st.number_input("Variation (± From Average)", min_value=0, value=0, step=5, key="t4_variation")
             low_bound = max(0, avg_demand - variation)
             high_bound = avg_demand + variation
             std_dev = 0
         else:
-            std_dev = st.number_input("Std Dev (Variation σ)", min_value=0.1, value=10.0, step=1.0, key="t4_std_dev")
+            # Changed min_value to 0.0 and default value to 0.0
+            std_dev = st.number_input("Std Dev (Variation σ)", min_value=0.0, value=0.0, step=1.0, key="t4_std_dev")
             low_bound, high_bound, variation = 0, 0, 0
 
     if dist_type == "Uniform":
@@ -654,7 +656,7 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: SUPPLY CHAIN ENGINE WITH PIPELINE TRACKING
+    # SECTION 2: SUPPLY CHAIN ENGINE
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
@@ -682,11 +684,9 @@ with tab4:
 
         for _ in range(num_days):
             day_counter += 1
-            
-            # Record initial opening stock balance
             initial_opening_stock = current_inv
             
-            # 1. MORNING PHASE: Process shipments arriving at daybreak
+            # Morning Arrivals
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
@@ -702,13 +702,16 @@ with tab4:
             
             updated_opening_stock = current_inv
             
-            # 2. DAYTIME PHASE: Generate dynamic demand
+            # Demand Gen (Handles 0 variation smoothly)
             if dist_type == "Normal":
                 demand = max(0, int(rng.normal(float(avg_demand), float(std_dev))))
             else:
-                demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
+                if low_bound == high_bound:
+                    demand = int(avg_demand)
+                else:
+                    demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
             
-            # Fulfill demand against available stock
+            # Fulfill Demand
             total_needed = demand + backlog
             if updated_opening_stock >= total_needed:
                 sales_met = demand
@@ -728,7 +731,7 @@ with tab4:
                     
                 closing_inv = 0
                 
-            # 3. EVENING PHASE: Evaluate position and track active pipeline orders
+            # Evening Order Placements
             pipeline_qty_before_order = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty_before_order - backlog
             
@@ -738,7 +741,6 @@ with tab4:
                 target_delivery = day_counter + lead_time + 1
                 pipeline_orders.append({'delivery_day': target_delivery, 'qty': order_qty})
             
-            # Calculate total outstanding pipeline inventory at the close of today
             total_pipeline_inventory = sum(order['qty'] for order in pipeline_orders)
             
             if order_placed_tonight > 0:
@@ -749,17 +751,10 @@ with tab4:
                 pipeline_status = "Clear"
 
             new_records.append({
-                'Day': day_counter,
-                'Opening Stock': initial_opening_stock,
-                'Arrived Morning': arriving_qty,
-                'Updated Opening Stock': updated_opening_stock,
-                'Demand Generated': demand,
-                'Sales Met': sales_met,
-                'Shortage': shortage,
-                'Unfulfilled Backlog': backlog,
-                'Closing Inventory': closing_inv,
-                'Order Placed Evening': order_placed_tonight,
-                'Total Pipeline Inventory': total_pipeline_inventory,
+                'Day': day_counter, 'Opening Stock': initial_opening_stock, 'Arrived Morning': arriving_qty,
+                'Updated Opening Stock': updated_opening_stock, 'Demand Generated': demand, 'Sales Met': sales_met,
+                'Shortage': shortage, 'Unfulfilled Backlog': backlog, 'Closing Inventory': closing_inv,
+                'Order Placed Evening': order_placed_tonight, 'Total Pipeline Inventory': total_pipeline_inventory,
                 'Pipeline Status': pipeline_status
             })
             
@@ -809,7 +804,6 @@ with tab4:
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
         
-        # Defensive schema upgrades
         if 'Unfulfilled Backlog' not in df.columns:
             df['Unfulfilled Backlog'] = 0
         if 'Total Pipeline Inventory' not in df.columns:
@@ -826,74 +820,68 @@ with tab4:
         m1.metric("Current Day", int(df['Day'].iloc[-1]))
         m2.metric("Closing Inventory Balance", f"{int(df['Closing Inventory'].iloc[-1])} units")
         m3.metric("Service Level Achievement", f"{service_level:.1f}%")
-        # Added active pipeline volume visibility to the main scoreboard cards
-        m4.metric("Active Pipeline Inventory", f"{int(df['Total Pipeline Inventory'].iloc[-1])} units", delta=f"{stockout_days} stockout days", delta_color="inverse")
+        m4.metric("Active Pipeline Inventory", f"{int(df['Total Pipeline Inventory'].iloc[-1])} units")
 
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
 
         shared_layout = dict(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#E0E0E0", family="sans-serif"),
-            margin=dict(l=40, r=20, t=30, b=40),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#E0E0E0", family="sans-serif"), margin=dict(l=40, r=20, t=30, b=40),
             xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)"),
             yaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)")
         )
 
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
-            
             net_inventory_curve = df['Closing Inventory'] - df['Unfulfilled Backlog']
             
             fig_inv = go.Figure()
             fig_inv.add_trace(go.Scatter(
-                x=df['Day'], y=net_inventory_curve,
-                mode='lines+markers', name='Net Inventory State',
-                line=dict(color='#3A96FF', width=2.5, shape='spline'),
-                marker=dict(size=5, color='#3A96FF'),
+                x=df['Day'], y=net_inventory_curve, mode='lines+markers', name='Net Inventory State',
+                line=dict(color='#3A96FF', width=2.5, shape='spline'), marker=dict(size=5, color='#3A96FF'),
                 fill='tozeroy', fillcolor='rgba(58, 150, 255, 0.1)'
             ))
             fig_inv.add_trace(go.Scatter(
-                x=df['Day'], y=[reorder_point]*len(df),
-                mode='lines', name='Reorder Point Target (ROP)',
+                x=df['Day'], y=[reorder_point]*len(df), mode='lines', name='Reorder Point Target (ROP)',
                 line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
-            
-            fig_inv.update_layout(
-                **shared_layout,
-                xaxis_title="Day",
-                yaxis_title="Units State Balance",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
+            fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units State Balance", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             
             lowest_point = min(net_inventory_curve.min() - 20, -20)
             highest_point = max(df['Closing Inventory'].max() + 20, reorder_point + 20)
             fig_inv.update_yaxes(range=[lowest_point, highest_point])
             st.plotly_chart(fig_inv, use_container_width=True)
 
-        if dist_type == "Uniform":
-            total_elements = high_bound - low_bound + 1
-            if total_elements % 5 == 0:
-                bin_size = 5
-            elif total_elements % 10 == 0:
-                bin_size = 10
-            else:
-                bin_size = max(1, total_elements // 5)
-            breaks = np.arange(low_bound - 0.5, high_bound + 0.5 + bin_size, bin_size)
-        else:
-            breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
+        # PROTECTED BINNING CALCULATOR (Handles zero variation charts without crashing)
+        is_zero_variation = (dist_type == "Uniform" and variation == 0) or (dist_type == "Normal" and std_dev == 0.0)
 
         with col_graph2:
             st.markdown("**Generated Demand Distribution**")
             fig_hist = go.Figure()
-            fig_hist.add_trace(go.Histogram(
-                x=df['Demand Generated'],
-                xbins=dict(start=breaks[0], end=breaks[-1], size=(breaks[1] - breaks[0])),
-                autobinx=False,
-                name='Demand Frequency',
-                marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
-            ))
+            
+            if is_zero_variation:
+                # Force a clean, solid single bar display right on top of static demand value
+                fig_hist.add_trace(go.Bar(
+                    x=[avg_demand], y=[len(df)], name='Demand Frequency',
+                    marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5)),
+                    width=[4.0]
+                ))
+                fig_hist.update_layout(**shared_layout, xaxis=dict(range=[avg_demand - 10, avg_demand + 10], tickvals=[avg_demand]))
+            else:
+                if dist_type == "Uniform":
+                    total_elements = high_bound - low_bound + 1
+                    bin_size = 5 if total_elements % 5 == 0 else (10 if total_elements % 10 == 0 else max(1, total_elements // 5))
+                    breaks = np.arange(low_bound - 0.5, high_bound + 0.5 + bin_size, bin_size)
+                else:
+                    breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
+                
+                fig_hist.add_trace(go.Histogram(
+                    x=df['Demand Generated'], xbins=dict(start=breaks[0], end=breaks[-1], size=(breaks[1] - breaks[0])),
+                    autobinx=False, name='Demand Frequency',
+                    marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
+                ))
+                
             fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
@@ -901,40 +889,43 @@ with tab4:
 
         # COLLAPSIBLE TABLE 1: Distribution Table
         with st.expander("📊 View Distribution Bin Analysis Data Table", expanded=False):
-            counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
-            total_elements_count = len(df)
-            
-            bin_records = []
-            for i in range(len(counts)):
-                lower_lbl = int(np.ceil(edges[i]))
-                upper_lbl = int(np.floor(edges[i+1]))
-                if dist_type == "Uniform" and (upper_lbl < low_bound or lower_lbl > high_bound):
-                    continue
-                pct_share = (counts[i] / total_elements_count) * 100
-                bin_records.append({
-                    "Demand Bracket Range": f"{lower_lbl} to {upper_lbl} units",
-                    "Days Sampled (Count)": int(counts[i]),
-                    "Distribution Share (%)": f"{pct_share:.1f}%"
-                })
+            if is_zero_variation:
+                bin_records = [{
+                    "Demand Bracket Range": f"{avg_demand} to {avg_demand} units (Static)",
+                    "Days Sampled (Count)": int(len(df)),
+                    "Distribution Share (%)": "100.0%"
+                }]
+            else:
+                counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
+                total_elements_count = len(df)
+                bin_records = []
+                for i in range(len(counts)):
+                    lower_lbl = int(np.ceil(edges[i]))
+                    upper_lbl = int(np.floor(edges[i+1]))
+                    if dist_type == "Uniform" and (upper_lbl < low_bound or lower_lbl > high_bound):
+                        continue
+                    pct_share = (counts[i] / total_elements_count) * 100
+                    bin_records.append({
+                        "Demand Bracket Range": f"{lower_lbl} to {upper_lbl} units",
+                        "Days Sampled (Count)": int(counts[i]),
+                        "Distribution Share (%)": f"{pct_share:.1f}%"
+                    })
             st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
 
         # COLLAPSIBLE TABLE 2: Operations Ledger
         with st.expander("📋 View Full Operations Ledger History Log", expanded=False):
             display_df = df.copy().sort_values(by='Day', ascending=False)
             st.dataframe(
-                display_df, 
-                use_container_width=True, 
-                hide_index=True,
+                display_df, use_container_width=True, hide_index=True,
                 column_config={
                     "Opening Stock": st.column_config.NumberColumn("Opening Stock (Yesterday)"),
                     "Arrived Morning": st.column_config.NumberColumn("☀️ Arrived Morning"),
                     "Updated Opening Stock": st.column_config.NumberColumn("🔄 Updated Opening Stock"),
                     "Unfulfilled Backlog": st.column_config.NumberColumn("🚨 Active Backlog"),
                     "Order Placed Evening": st.column_config.NumberColumn("🌙 Ordered Evening"),
-                    "Total Pipeline Inventory": st.column_config.NumberColumn("📦 Total Pipeline Inventory", help="Sum of all en route inventory units traveling in the supply chain"),
+                    "Total Pipeline Inventory": st.column_config.NumberColumn("📦 Total Pipeline Inventory"),
                     "Closing Inventory": st.column_config.NumberColumn("Closing Stock")
                 }
             )
-
     else:
         st.info("💡 Interaction Required: Execute steps using the gameplay action controls above to populate tables and performance metrics.")
