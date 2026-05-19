@@ -656,10 +656,8 @@ with tab4:
         current_inv = st.session_state.t4_current_inv
         pipeline_orders = list(st.session_state.t4_pipeline_orders)
         
-        # FIX: Instantiate an unseeded, independent random state engine local to this function call
-        # This completely breaks any ties with global np.random.seed lines elsewhere in the app.
+        # Instantiate an unseeded, independent random state engine local to this function call
         rng = np.random.RandomState()
-        
         new_records = []
 
         for _ in range(num_days):
@@ -671,7 +669,7 @@ with tab4:
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # Use the isolated local generator engine ('rng' instead of 'np.random')
+            # Use the isolated local generator engine
             if dist_type == "Normal":
                 demand = max(0, int(rng.normal(float(avg_demand), float(std_dev))))
             else:
@@ -741,7 +739,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & DYNAMIC BREAKDOWN
+    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -813,31 +811,34 @@ with tab4:
             fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
-        # Distribution Share Table updates actively on each button step click
-        st.markdown("### 📊 Distribution Bin Analysis")
-        counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
-        total_elements = len(df)
-        
-        bin_records = []
-        for i in range(len(counts)):
-            lower_lbl = int(edges[i])
-            upper_lbl = int(edges[i+1]) - 1
-            
-            if dist_type == "Uniform" and (upper_lbl < low_bound or lower_lbl > high_bound):
-                continue
-                
-            pct_share = (counts[i] / total_elements) * 100
-            
-            bin_records.append({
-                "Demand Bracket Range": f"{max(low_bound, lower_lbl)} to {min(high_bound, upper_lbl)} units",
-                "Days Sampled (Count)": int(counts[i]),
-                "Distribution Share (%)": f"{pct_share:.1f}%"
-            })
-            
-        st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
+        st.markdown("---")
 
-        st.subheader("📋 Operations Ledger History")
-        st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
+        # COLLAPSIBLE TABLE 1: Distribution Share Table
+        with st.expander("📊 View Distribution Bin Analysis Data Table", expanded=False):
+            counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
+            total_elements = len(df)
+            
+            bin_records = []
+            for i in range(len(counts)):
+                lower_lbl = int(edges[i])
+                upper_lbl = int(edges[i+1]) - 1
+                
+                if dist_type == "Uniform" and (upper_lbl < low_bound or lower_lbl > high_bound):
+                    continue
+                    
+                pct_share = (counts[i] / total_elements) * 100
+                
+                bin_records.append({
+                    "Demand Bracket Range": f"{max(low_bound, lower_lbl)} to {min(high_bound, upper_lbl)} units",
+                    "Days Sampled (Count)": int(counts[i]),
+                    "Distribution Share (%)": f"{pct_share:.1f}%"
+                })
+                
+            st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
+
+        # COLLAPSIBLE TABLE 2: Operations Ledger History Table
+        with st.expander("📋 View Full Operations Ledger History Log", expanded=False):
+            st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
 
     else:
         st.info("💡 Interaction Required: Execute steps using the gameplay action controls above to populate tables and performance metrics.")
