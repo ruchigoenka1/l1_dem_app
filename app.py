@@ -652,12 +652,7 @@ with tab4:
         st.session_state.t4_current_inv = starting_inventory
         st.session_state.t4_pipeline_orders = [] 
 
-    def generate_demand(dist, avg, s_dev, low, high):
-        if dist == "Normal":
-            return max(0, int(np.random.normal(avg, s_dev)))
-        else:
-            return int(np.random.randint(low, high + 1))
-
+    # FIXED: The engine now reads directly from widgets variables dynamically inside the function execution block
     def run_simulation_steps(num_days):
         history_list = st.session_state.t4_history.to_dict('records')
         day_counter = st.session_state.t4_day_counter
@@ -668,12 +663,18 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
+            # Arriving shipments
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            demand = generate_demand(dist_type, avg_demand, std_dev, low_bound, high_bound)
+            # FIXED: Forces numpy to evaluate a brand new random integer on every single day loop execution
+            if dist_type == "Normal":
+                demand = max(0, int(np.random.normal(avg_demand, std_dev)))
+            else:
+                demand = int(np.random.randint(low_bound, high_bound + 1))
             
+            # Fulfill demand
             if opening_inv >= demand:
                 sales_met = demand
                 shortage = 0
@@ -683,6 +684,7 @@ with tab4:
                 shortage = demand - opening_inv
                 closing_inv = 0
                 
+            # Pipeline Monitoring
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty
             
@@ -733,7 +735,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: UPDATED VISUALIZATIONS WITH DARK MODE AESTHETICS
+    # SECTION 4: LIVE CHARTS & TABLES
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -754,77 +756,46 @@ with tab4:
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
 
-        # Shared layout configuration to match the dark theme and eliminate the stark white borders
         shared_layout = dict(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
             font=dict(color="#E0E0E0", family="sans-serif"),
             margin=dict(l=40, r=20, t=30, b=40),
-            xaxis=dict(
-                showgrid=True,
-                gridcolor="rgba(255, 255, 255, 0.07)",
-                zeroline=False,
-                linecolor="rgba(255, 255, 255, 0.15)"
-            ),
-            yaxis=dict(
-                showgrid=True,
-                gridcolor="rgba(255, 255, 255, 0.07)",
-                zeroline=False,
-                linecolor="rgba(255, 255, 255, 0.15)"
-            )
+            xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)"),
+            yaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)")
         )
 
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
             fig_inv = go.Figure()
             
-            # Smooth area trace for Closing Inventory
             fig_inv.add_trace(go.Scatter(
                 x=df['Day'], y=df['Closing Inventory'],
                 mode='lines+markers', name='Closing Inventory',
                 line=dict(color='#3A96FF', width=2.5, shape='spline'),
                 marker=dict(size=5, color='#3A96FF'),
-                fill='tozeroy',
-                fillcolor='rgba(58, 150, 255, 0.1)'
+                fill='tozeroy', fillcolor='rgba(58, 150, 255, 0.1)'
             ))
             
-            # Clean horizontal line for Reorder Point Target (ROP)
             fig_inv.add_trace(go.Scatter(
                 x=df['Day'], y=[reorder_point]*len(df),
                 mode='lines', name='Reorder Point Target (ROP)',
                 line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
             
-            fig_inv.update_layout(
-                **shared_layout,
-                xaxis_title="Day",
-                yaxis_title="Units",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
+            fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig_inv, use_container_width=True)
 
         with col_graph2:
             st.markdown("**Generated Demand Distribution**")
             fig_hist = go.Figure()
             
-            # Refined Histogram layout with customized gap size and clean colors
             fig_hist.add_trace(go.Histogram(
-                x=df['Demand Generated'], 
-                nbinsx=15,
-                name='Demand Frequency',
-                marker=dict(
-                    color='rgba(58, 150, 255, 0.4)',
-                    line=dict(color='#3A96FF', width=1.5)
-                )
+                x=df['Demand Generated'], nbinsx=15, name='Demand Frequency',
+                marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
             ))
             
-            fig_hist.update_layout(
-                **shared_layout,
-                bargap=0.08,
-                xaxis_title="Demand Bracket",
-                yaxis_title="Days Logged",
-                showlegend=False
-            )
+            fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
         st.subheader("📋 Operations Ledger History")
