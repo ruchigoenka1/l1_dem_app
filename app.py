@@ -614,29 +614,27 @@ with tab4:
     col_cfg1, col_cfg2 = st.columns(2)
 
     with col_cfg1:
-        avg_demand = st.number_input("Average Demand", min_value=1, value=100, step=5, key="t4_avg_dem")
+        avg_demand = st.number_input("Average Demand", min_value=1, value=50, step=5, key="t4_avg_dem")
         
     with col_cfg2:
         if dist_type == "Uniform":
-            # Single variation input fields for +/- calculation
-            variation = st.number_input("Variation (± From Average)", min_value=0, value=30, step=5, key="t4_variation")
+            variation = st.number_input("Variation (± From Average)", min_value=1, value=30, step=5, key="t4_variation")
             low_bound = max(0, avg_demand - variation)
             high_bound = avg_demand + variation
             std_dev = 0
         else:
-            std_dev = st.number_input("Std Dev (Variation σ)", min_value=0.0, value=15.0, step=1.0, key="t4_std_dev")
+            std_dev = st.number_input("Std Dev (Variation σ)", min_value=0.1, value=10.0, step=1.0, key="t4_std_dev")
             low_bound, high_bound, variation = 0, 0, 0
 
-    # Display calculated absolute limits subtly if Uniform is active
     if dist_type == "Uniform":
-        st.markdown(f"🏼 *Calculated Range: **{low_bound}** to **{high_bound}** units*")
+        st.markdown(f"🔹 *Active Range: **{low_bound}** to **{high_bound}** units*")
 
     with st.expander("🛠️ Advanced Inventory Settings", expanded=False):
         col_inv1, col_inv2, col_inv3 = st.columns(3)
         with col_inv1:
             reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
         with col_inv2:
-            starting_inventory = st.number_input("Starting On-Hand Inventory", min_value=1, value=300, step=10, key="t4_start_inv")
+            starting_inventory = st.number_input("Starting On-Hand Inventory", min_value=1, value=188, step=10, key="t4_start_inv")
         with col_inv3:
             order_qty = st.number_input("Replenishment Batch Size (Q)", min_value=1, value=200, step=10, key="t4_q")
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
@@ -662,19 +660,15 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
-            # Incoming shipments arriving
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # Precise mathematical simulation step assignment
             if dist_type == "Normal":
                 demand = max(0, int(np.random.normal(avg_demand, std_dev)))
             else:
-                # np.random.randint is high-bound exclusive, +1 ensures full inclusive reach
                 demand = int(np.random.randint(low_bound, high_bound + 1))
             
-            # Fulfill demand
             if opening_inv >= demand:
                 sales_met = demand
                 shortage = 0
@@ -684,7 +678,6 @@ with tab4:
                 shortage = demand - opening_inv
                 closing_inv = 0
                 
-            # Pipeline Monitoring
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty
             
@@ -735,7 +728,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS
+    # SECTION 4: VISUALIZATIONS & BIN DATA TABLE
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -783,22 +776,23 @@ with tab4:
             fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig_inv, use_container_width=True)
 
+        # Calculate exact matching mathematical cutoffs for the distribution table layout
+        if dist_type == "Uniform":
+            total_range = high_bound - low_bound + 1
+            bin_size = 5 if total_range % 5 == 0 else max(1, total_range // 8)
+            breaks = np.arange(low_bound - 0.5, high_bound + 0.5 + bin_size, bin_size)
+        else:
+            # Clean standard normal splits for standard deviation bounds
+            breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
+
         with col_graph2:
             st.markdown("**Generated Demand Distribution**")
             fig_hist = go.Figure()
             
-            # Map dynamic histogram bins based on parameters chosen to ensure flat distribution displays
-            if dist_type == "Uniform" and high_bound > low_bound:
-                hist_bins = dict(start=low_bound, end=high_bound + 1, size=max(1, (high_bound - low_bound) // 8))
-                autobinx_flag = False
-            else:
-                hist_bins = None
-                autobinx_flag = True
-
             fig_hist.add_trace(go.Histogram(
                 x=df['Demand Generated'],
-                xbins=hist_bins,
-                autobinx=autobinx_flag,
+                xbins=dict(start=breaks[0], end=breaks[-1], size=breaks[1]-breaks[0]) if dist_type == "Uniform" else None,
+                autobinx=False if dist_type == "Uniform" else True,
                 name='Demand Frequency',
                 marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
             ))
@@ -806,5 +800,30 @@ with tab4:
             fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
+        # Dynamic Bin Data Frequency Breakdown Table Generation
+        st.markdown("### 📊 Distribution Bin Analysis")
+        counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
+        
+        bin_records = []
+        total_elements = len(df)
+        
+        for i in range(len(counts)):
+            # Round bracket titles gracefully to hide floating point adjustments
+            lower_lbl = int(np.ceil(edges[i]))
+            upper_lbl = int(np.floor(edges[i+1]))
+            pct_share = (counts[i] / total_elements) * 100
+            
+            bin_records.append({
+                "Demand Bracket Range": f"{lower_lbl} to {upper_lbl} units",
+                "Days Sampled (Count)": int(counts[i]),
+                "Distribution Share (%)": f"{pct_share:.1f}%"
+            })
+            
+        bin_df = pd.DataFrame(bin_records)
+        st.dataframe(bin_df, use_container_width=True, hide_index=True)
+
         st.subheader("📋 Operations Ledger History")
         st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
+
+    else:
+        st.info("💡 Interaction Required: Execute steps using the gameplay action controls above to populate tables and performance metrics.")
