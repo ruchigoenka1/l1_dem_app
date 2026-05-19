@@ -654,6 +654,10 @@ with tab4:
         st.session_state.t4_pipeline_orders = [] 
 
     def run_simulation_steps(num_days):
+        # DEFENSIVE FIX: Check and initialize backlog locally if missing from active session state
+        if 't4_backlog' not in st.session_state:
+            st.session_state.t4_backlog = 0
+            
         history_df = st.session_state.t4_history.copy()
         day_counter = st.session_state.t4_day_counter
         current_inv = st.session_state.t4_current_inv
@@ -769,7 +773,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES (FIXED KEYWORD ARG)
+    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES 
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -793,7 +797,6 @@ with tab4:
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
 
-        # Base properties for the layout dictionary footprint
         shared_layout = dict(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
@@ -822,7 +825,6 @@ with tab4:
                 line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
             
-            # Apply base styling layout dictionary unpacking
             fig_inv.update_layout(
                 **shared_layout,
                 xaxis_title="Day",
@@ -830,7 +832,6 @@ with tab4:
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             
-            # FIXED MECHANISM: Update target axis updates safely via individual target modifier properties
             lowest_point = min(net_inventory_curve.min() - 20, -20)
             highest_point = max(df['Closing Inventory'].max() + 20, reorder_point + 20)
             fig_inv.update_yaxes(range=[lowest_point, highest_point])
