@@ -650,7 +650,7 @@ with tab4:
         ])
         st.session_state.t4_day_counter = 0
         st.session_state.t4_current_inv = starting_inventory
-        st.session_state.t4_backlog = 0  # Dynamic tracker for persistent backlogs
+        st.session_state.t4_backlog = 0  
         st.session_state.t4_pipeline_orders = [] 
 
     def run_simulation_steps(num_days):
@@ -769,10 +769,14 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS WITH UPDATED Y-AXIS SHIFT LOGIC
+    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
+        
+        # CRITICAL PROTECTION: Injects fallback default values if older browser session state schemas are active
+        if 'Unfulfilled Backlog' not in df.columns:
+            df['Unfulfilled Backlog'] = 0
         
         total_shortages = df['Shortage'].sum()
         stockout_days = (df['Shortage'] > 0).sum()
@@ -802,7 +806,7 @@ with tab4:
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
             
-            # Create a combined visualization line: drops below zero if a backlog forms
+            # Net inventory curve drops below zero to accurately visualize backlog severity
             net_inventory_curve = df['Closing Inventory'] - df['Unfulfilled Backlog']
             
             fig_inv = go.Figure()
@@ -819,7 +823,6 @@ with tab4:
                 line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
             
-            # Anchor Y-axis lower bounds dynamically to clearly show backlog depth
             lowest_point = min(net_inventory_curve.min() - 20, -20)
             highest_point = max(df['Closing Inventory'].max() + 20, reorder_point + 20)
             
@@ -832,9 +835,15 @@ with tab4:
             )
             st.plotly_chart(fig_inv, use_container_width=True)
 
+        # AUTOMATED PERFECT BALANCING ENGINE
         if dist_type == "Uniform":
             total_elements = high_bound - low_bound + 1
-            bin_size = 5 if total_elements % 5 == 0 else (10 if total_elements % 10 == 0 else max(1, total_elements // 5))
+            if total_elements % 5 == 0:
+                bin_size = 5
+            elif total_elements % 10 == 0:
+                bin_size = 10
+            else:
+                bin_size = max(1, total_elements // 5)
             breaks = np.arange(low_bound - 0.5, high_bound + 0.5 + bin_size, bin_size)
         else:
             breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
@@ -873,7 +882,7 @@ with tab4:
                 })
             st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
 
-        # COLLAPSIBLE TABLE 2: Operations Ledger with explicit Backlog tracker column
+        # COLLAPSIBLE TABLE 2: Operations Ledger
         with st.expander("📋 View Full Operations Ledger History Log", expanded=False):
             display_df = df.copy().sort_values(by='Day', ascending=False)
             st.dataframe(
@@ -883,7 +892,7 @@ with tab4:
                 column_config={
                     "Opening Inventory": st.column_config.NumberColumn("Opening Stock"),
                     "Received Morning": st.column_config.NumberColumn("☀️ Arrived Morning"),
-                    "Unfulfilled Backlog": st.column_config.NumberColumn("🚨 Unfulfilled Backlog", help="Accumulated unmet market demand"),
+                    "Unfulfilled Backlog": st.column_config.NumberColumn("🚨 Unfulfilled Backlog"),
                     "Order Placed Evening": st.column_config.NumberColumn("🌙 Ordered Evening"),
                     "Closing Inventory": st.column_config.NumberColumn("Closing Stock")
                 }
