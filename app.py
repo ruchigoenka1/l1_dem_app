@@ -654,13 +654,13 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: SUPPLY CHAIN ENGINE WITH MORNING UPDATE TIMELINE
+    # SECTION 2: SUPPLY CHAIN ENGINE WITH PIPELINE TRACKING
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
             'Day', 'Opening Stock', 'Arrived Morning', 'Updated Opening Stock', 
             'Demand Generated', 'Sales Met', 'Shortage', 'Unfulfilled Backlog', 
-            'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
+            'Closing Inventory', 'Order Placed Evening', 'Total Pipeline Inventory', 'Pipeline Status'
         ])
         st.session_state.t4_day_counter = 0
         st.session_state.t4_current_inv = starting_inventory
@@ -683,14 +683,13 @@ with tab4:
         for _ in range(num_days):
             day_counter += 1
             
-            # Record what we start with from yesterday evening before arrivals
+            # Record initial opening stock balance
             initial_opening_stock = current_inv
             
-            # 1. MORNING PHASE: Capture any incoming shipments
+            # 1. MORNING PHASE: Process shipments arriving at daybreak
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # Process incoming shipments and clear existing backlog first if active
             if arriving_qty > 0:
                 if allow_backlog == "Yes" and backlog > 0:
                     if arriving_qty >= backlog:
@@ -701,7 +700,6 @@ with tab4:
                         arriving_qty = 0
                 current_inv += arriving_qty
             
-            # The adjusted inventory base now ready to face today's customer demand
             updated_opening_stock = current_inv
             
             # 2. DAYTIME PHASE: Generate dynamic demand
@@ -710,7 +708,7 @@ with tab4:
             else:
                 demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
             
-            # Fulfill client demand against available stock
+            # Fulfill demand against available stock
             total_needed = demand + backlog
             if updated_opening_stock >= total_needed:
                 sales_met = demand
@@ -730,18 +728,23 @@ with tab4:
                     
                 closing_inv = 0
                 
-            # 3. EVENING PHASE: Evaluate position (On-Hand + Pipeline - Backlog)
-            pipeline_qty = sum(order['qty'] for order in pipeline_orders)
-            inventory_position = closing_inv + pipeline_qty - backlog
+            # 3. EVENING PHASE: Evaluate position and track active pipeline orders
+            pipeline_qty_before_order = sum(order['qty'] for order in pipeline_orders)
+            inventory_position = closing_inv + pipeline_qty_before_order - backlog
             
             order_placed_tonight = 0
             if inventory_position <= reorder_point:
                 order_placed_tonight = order_qty
                 target_delivery = day_counter + lead_time + 1
                 pipeline_orders.append({'delivery_day': target_delivery, 'qty': order_qty})
+            
+            # Calculate total outstanding pipeline inventory at the close of today
+            total_pipeline_inventory = sum(order['qty'] for order in pipeline_orders)
+            
+            if order_placed_tonight > 0:
                 pipeline_status = f"Placed Order (Arriving Day {target_delivery} Morning)"
-            elif pipeline_qty > 0:
-                pipeline_status = f"{pipeline_qty} units en route"
+            elif total_pipeline_inventory > 0:
+                pipeline_status = f"{total_pipeline_inventory} units en route"
             else:
                 pipeline_status = "Clear"
 
@@ -756,6 +759,7 @@ with tab4:
                 'Unfulfilled Backlog': backlog,
                 'Closing Inventory': closing_inv,
                 'Order Placed Evening': order_placed_tonight,
+                'Total Pipeline Inventory': total_pipeline_inventory,
                 'Pipeline Status': pipeline_status
             })
             
@@ -774,7 +778,7 @@ with tab4:
         st.session_state.t4_history = pd.DataFrame(columns=[
             'Day', 'Opening Stock', 'Arrived Morning', 'Updated Opening Stock', 
             'Demand Generated', 'Sales Met', 'Shortage', 'Unfulfilled Backlog', 
-            'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
+            'Closing Inventory', 'Order Placed Evening', 'Total Pipeline Inventory', 'Pipeline Status'
         ])
         st.session_state.t4_day_counter = 0
         st.session_state.t4_current_inv = starting_inventory
@@ -805,8 +809,11 @@ with tab4:
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
         
+        # Defensive schema upgrades
         if 'Unfulfilled Backlog' not in df.columns:
             df['Unfulfilled Backlog'] = 0
+        if 'Total Pipeline Inventory' not in df.columns:
+            df['Total Pipeline Inventory'] = 0
         
         total_shortages = df['Shortage'].sum()
         stockout_days = (df['Shortage'] > 0).sum()
@@ -819,7 +826,8 @@ with tab4:
         m1.metric("Current Day", int(df['Day'].iloc[-1]))
         m2.metric("Closing Inventory Balance", f"{int(df['Closing Inventory'].iloc[-1])} units")
         m3.metric("Service Level Achievement", f"{service_level:.1f}%")
-        m4.metric("Total Stockout Events", f"{stockout_days} days", delta=f"{int(total_shortages)} units missed", delta_color="inverse")
+        # Added active pipeline volume visibility to the main scoreboard cards
+        m4.metric("Active Pipeline Inventory", f"{int(df['Total Pipeline Inventory'].iloc[-1])} units", delta=f"{stockout_days} stockout days", delta_color="inverse")
 
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
@@ -923,6 +931,7 @@ with tab4:
                     "Updated Opening Stock": st.column_config.NumberColumn("🔄 Updated Opening Stock"),
                     "Unfulfilled Backlog": st.column_config.NumberColumn("🚨 Active Backlog"),
                     "Order Placed Evening": st.column_config.NumberColumn("🌙 Ordered Evening"),
+                    "Total Pipeline Inventory": st.column_config.NumberColumn("📦 Total Pipeline Inventory", help="Sum of all en route inventory units traveling in the supply chain"),
                     "Closing Inventory": st.column_config.NumberColumn("Closing Stock")
                 }
             )
