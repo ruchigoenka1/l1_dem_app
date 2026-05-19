@@ -601,7 +601,7 @@ with tab3:
 with tab4:
     st.header("🎯 Tab 4: Safety Stock Simulation Game")
     st.markdown("""
-    **The Challenge:** Balance inventory holding costs against stockout penalties. 
+    **The Challenge:** Balance inventory holding costs against shortages. 
     Replenishment orders are sent at the **end of the day** and arrive on the **morning of Day L+1**.
     """)
 
@@ -630,6 +630,20 @@ with tab4:
     if dist_type == "Uniform":
         st.markdown(f"🔹 *Active Range: **{low_bound}** to **{high_bound}** units*")
 
+    # NEW: Backlog Control Policy Configuration
+    st.markdown("### 2. Backlog & Stockout Policy")
+    col_back1, col_back2 = st.columns(2)
+    
+    with col_back1:
+        allow_backlog = st.radio("Can unfulfilled demand be backlogged for later?", ["Yes", "No"], index=0, key="t4_allow_backlog")
+        
+    with col_back2:
+        if allow_backlog == "Yes":
+            backlog_limit = st.number_input("Maximum Backlog Capacity Limit (0 for Unlimited)", min_value=0, value=100, step=10, key="t4_backlog_limit", help="Maximum units your customers are willing to wait for before canceling their orders.")
+        else:
+            st.markdown("<div style='padding-top: 30px; color: gray; font-size: 14px;'>❌ Lost Sales Policy Active: Inventory cannot drop below 0.</div>", unsafe_allow_html=True)
+            backlog_limit = 0
+
     with st.expander("🛠️ Advanced Inventory Settings", expanded=False):
         col_inv1, col_inv2, col_inv3 = st.columns(3)
         with col_inv1:
@@ -641,7 +655,7 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: SUPPLY CHAIN ENGINE WITH BACKLOG CLEARING LOGIC
+    # SECTION 2: SUPPLY CHAIN ENGINE WITH BACKLOG CONTROL POLICIES
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
@@ -654,7 +668,6 @@ with tab4:
         st.session_state.t4_pipeline_orders = [] 
 
     def run_simulation_steps(num_days):
-        # DEFENSIVE FIX: Check and initialize backlog locally if missing from active session state
         if 't4_backlog' not in st.session_state:
             st.session_state.t4_backlog = 0
             
@@ -670,12 +683,12 @@ with tab4:
         for _ in range(num_days):
             day_counter += 1
             
-            # 1. MORNING PHASE: Process incoming shipments and clear existing backlog first
+            # 1. MORNING PHASE: Process arrivals and clear existing backlog if allowed
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
             if arriving_qty > 0:
-                if backlog > 0:
+                if allow_backlog == "Yes" and backlog > 0:
                     if arriving_qty >= backlog:
                         arriving_qty -= backlog
                         backlog = 0
@@ -692,20 +705,40 @@ with tab4:
             else:
                 demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
             
-            # Fulfill client demand against available stock
-            total_needed = demand + backlog
-            if opening_inv >= total_needed:
-                sales_met = demand
-                shortage = 0
-                backlog = 0
-                closing_inv = opening_inv - total_needed
+            # 3. SHORTAGE STRATEGY COMPLIANCE ENGINE
+            if allow_backlog == "Yes":
+                total_needed = demand + backlog
+                if opening_inv >= total_needed:
+                    sales_met = demand
+                    shortage = 0
+                    backlog = 0
+                    closing_inv = opening_inv - total_needed
+                else:
+                    sales_met = max(0, opening_inv - backlog)
+                    raw_shortage = total_needed - opening_inv
+                    
+                    # Apply backlog capacity cap constraint
+                    if backlog_limit > 0:
+                        backlog = min(raw_shortage, backlog_limit)
+                        shortage = raw_shortage  # Total unfilled demand for the day
+                    else:
+                        backlog = raw_shortage
+                        shortage = raw_shortage
+                        
+                    closing_inv = 0
             else:
-                sales_met = max(0, opening_inv - backlog)
-                shortage = total_needed - opening_inv
-                backlog = total_needed - opening_inv
-                closing_inv = 0
+                # Lost Sales Policy Engine: Stock resets exactly to 0
+                backlog = 0
+                if opening_inv >= demand:
+                    sales_met = demand
+                    shortage = 0
+                    closing_inv = opening_inv - demand
+                else:
+                    sales_met = opening_inv
+                    shortage = demand - opening_inv
+                    closing_inv = 0
                 
-            # 3. EVENING PHASE: Evaluate inventory position (On-Hand + Pipeline - Backlog)
+            # 4. EVENING PHASE: Evaluate position (On-Hand + Pipeline - Backlog)
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty - backlog
             
@@ -773,7 +806,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES 
+    # SECTION 4: VISUALIZATIONS & COLLAPSIBLE TABLES
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -809,6 +842,7 @@ with tab4:
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
             
+            # Net inventory curves visually fall below zero only if backlogs are permitted by policy
             net_inventory_curve = df['Closing Inventory'] - df['Unfulfilled Backlog']
             
             fig_inv = go.Figure()
@@ -895,7 +929,7 @@ with tab4:
                 column_config={
                     "Opening Inventory": st.column_config.NumberColumn("Opening Stock"),
                     "Received Morning": st.column_config.NumberColumn("☀️ Arrived Morning"),
-                    "Unfulfilled Backlog": st.column_config.NumberColumn("🚨 Unfulfilled Backlog"),
+                    "Unfulfilled Backlog": st.column_config.NumberColumn("🚨 Active Backlog"),
                     "Order Placed Evening": st.column_config.NumberColumn("🌙 Ordered Evening"),
                     "Closing Inventory": st.column_config.NumberColumn("Closing Stock")
                 }
