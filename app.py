@@ -606,14 +606,12 @@ with tab4:
     """)
 
     # =========================================================================
-    # SECTION 1: DATA CONFIGURATION (Single Phase - Styled like Screenshot 2)
+    # SECTION 1: DATA CONFIGURATION
     # =========================================================================
     st.markdown("### 1. Data Configuration")
     
-    # Row 1: Distribution Type selection (Defaulting to Uniform)
     dist_type = st.selectbox("Distribution Type", ["Uniform", "Normal"], index=0, key="t4_dist_type")
     
-    # Row 2: Dynamic parameters based on the chosen distribution
     col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
 
     with col_cfg1:
@@ -622,10 +620,10 @@ with tab4:
     with col_cfg2:
         if dist_type == "Uniform":
             low_bound = st.number_input("Minimum Possible Demand", min_value=0, value=max(0, avg_demand - 20), key="t4_low")
-            std_dev = 0  # Placeholder
+            std_dev = 0  
         else:
             std_dev = st.number_input("Std Dev (Variation)", min_value=0.0, value=15.0, step=1.0, key="t4_std_dev")
-            low_bound, high_bound = 0, 0  # Placeholders
+            low_bound, high_bound = 0, 0 
 
     with col_cfg3:
         if dist_type == "Uniform":
@@ -633,7 +631,6 @@ with tab4:
         else:
             st.markdown("<div style='padding-top: 25px; color: gray; font-size: 14px;'>N/A for Normal Dist</div>", unsafe_allow_html=True)
 
-    # Operational Parameters (Hidden cleanly inside an expander to keep the focus on Data Configuration)
     with st.expander("🛠️ Advanced Inventory Settings (Lead Time, Order Qty, ROP)", expanded=False):
         col_inv1, col_inv2, col_inv3 = st.columns(3)
         with col_inv1:
@@ -671,15 +668,12 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
-            # Incoming shipments
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # Demand Generation
             demand = generate_demand(dist_type, avg_demand, std_dev, low_bound, high_bound)
             
-            # Fulfill demand
             if opening_inv >= demand:
                 sales_met = demand
                 shortage = 0
@@ -689,7 +683,6 @@ with tab4:
                 shortage = demand - opening_inv
                 closing_inv = 0
                 
-            # Pipeline Monitoring
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty
             
@@ -713,7 +706,6 @@ with tab4:
         st.session_state.t4_current_inv = current_inv
         st.session_state.t4_pipeline_orders = pipeline_orders
 
-    # Reset Button
     if st.button("🔄 Reset Simulation Data", key="t4_reset_btn"):
         st.session_state.t4_history = pd.DataFrame(columns=[
             'Day', 'Opening Inventory', 'Demand Generated', 'Sales Met', 'Shortage', 'Closing Inventory', 'Pipeline Status'
@@ -741,7 +733,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: LIVE CHARTS & TABLES
+    # SECTION 4: UPDATED VISUALIZATIONS WITH DARK MODE AESTHETICS
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -762,44 +754,77 @@ with tab4:
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
 
+        # Shared layout configuration to match the dark theme and eliminate the stark white borders
+        shared_layout = dict(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#E0E0E0", family="sans-serif"),
+            margin=dict(l=40, r=20, t=30, b=40),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.07)",
+                zeroline=False,
+                linecolor="rgba(255, 255, 255, 0.15)"
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(255, 255, 255, 0.07)",
+                zeroline=False,
+                linecolor="rgba(255, 255, 255, 0.15)"
+            )
+        )
+
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
             fig_inv = go.Figure()
+            
+            # Smooth area trace for Closing Inventory
             fig_inv.add_trace(go.Scatter(
                 x=df['Day'], y=df['Closing Inventory'],
                 mode='lines+markers', name='Closing Inventory',
-                line=dict(color='#1f77b4', width=2)
+                line=dict(color='#3A96FF', width=2.5, shape='spline'),
+                marker=dict(size=5, color='#3A96FF'),
+                fill='tozeroy',
+                fillcolor='rgba(58, 150, 255, 0.1)'
             ))
+            
+            # Clean horizontal line for Reorder Point Target (ROP)
             fig_inv.add_trace(go.Scatter(
                 x=df['Day'], y=[reorder_point]*len(df),
                 mode='lines', name='Reorder Point Target (ROP)',
-                line=dict(color='#ef553b', dash='dash')
+                line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
+            
             fig_inv.update_layout(
-                xaxis_title="Day", yaxis_title="Units",
-                margin=dict(l=20, r=20, t=20, b=20),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-                plot_bgcolor="white"
+                **shared_layout,
+                xaxis_title="Day",
+                yaxis_title="Units",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
-            fig_inv.update_yaxes(showgrid=True, gridcolor='#f0f2f6')
-            fig_inv.update_xaxes(showgrid=True, gridcolor='#f0f2f6')
             st.plotly_chart(fig_inv, use_container_width=True)
 
         with col_graph2:
             st.markdown("**Generated Demand Distribution**")
             fig_hist = go.Figure()
+            
+            # Refined Histogram layout with customized gap size and clean colors
             fig_hist.add_trace(go.Histogram(
-                x=df['Demand Generated'], nbinsx=15,
-                marker_color='#abc9e9',
-                marker=dict(line=dict(color='#1f77b4', width=1))
+                x=df['Demand Generated'], 
+                nbinsx=15,
+                name='Demand Frequency',
+                marker=dict(
+                    color='rgba(58, 150, 255, 0.4)',
+                    line=dict(color='#3A96FF', width=1.5)
+                )
             ))
+            
             fig_hist.update_layout(
-                xaxis_title="Demand Bracket", yaxis_title="Days Logged",
-                margin=dict(l=20, r=20, t=20, b=20),
-                plot_bgcolor="white"
+                **shared_layout,
+                bargap=0.08,
+                xaxis_title="Demand Bracket",
+                yaxis_title="Days Logged",
+                showlegend=False
             )
-            fig_hist.update_yaxes(showgrid=True, gridcolor='#f0f2f6')
-            fig_hist.update_xaxes(showgrid=True, gridcolor='#f0f2f6')
             st.plotly_chart(fig_hist, use_container_width=True)
 
         st.subheader("📋 Operations Ledger History")
