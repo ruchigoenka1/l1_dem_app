@@ -601,7 +601,8 @@ with tab3:
 with tab4:
     st.header("🎯 Tab 4: Safety Stock Simulation Game")
     st.markdown("""
-    **The Challenge:** Balance inventory holding costs against stockout penalties. Watch the graphs change dynamically as new random demand is generated daily!
+    **The Challenge:** Balance inventory holding costs against stockout penalties. 
+    Replenishment orders are sent at the **end of the day** and arrive on the **morning of Day L+1**.
     """)
 
     # =========================================================================
@@ -640,11 +641,12 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: CORE SIMULATION ENGINE (WITH LOCAL RANDOM STATE ISOLATION)
+    # SECTION 2: SUPPLY CHAIN ENGINE (WITH L+1 MORNING ARRIVAL LOGIC)
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
-            'Day', 'Opening Inventory', 'Demand Generated', 'Sales Met', 'Shortage', 'Closing Inventory', 'Pipeline Status'
+            'Day', 'Opening Inventory', 'Received Morning', 'Demand Generated', 
+            'Sales Met', 'Shortage', 'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
         ])
         st.session_state.t4_day_counter = 0
         st.session_state.t4_current_inv = starting_inventory
@@ -661,17 +663,24 @@ with tab4:
 
         for _ in range(num_days):
             day_counter += 1
-            opening_inv = current_inv
             
+            # A) MORNING PHASE: Check for arrivals scheduled for this morning
+            # If placed on Day T, it arrives on morning of T + Lead Time + 1
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
-            opening_inv += arriving_qty
+            
+            # Add to physical inventory immediately at start of day
+            opening_inv = current_inv + arriving_qty
+            
+            # Remove arrived items from the pipeline tracking list
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
+            # B) DAYTIME PHASE: Generate dynamic demand
             if dist_type == "Normal":
                 demand = max(0, int(rng.normal(float(avg_demand), float(std_dev))))
             else:
                 demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
             
+            # Fulfill client demand
             if opening_inv >= demand:
                 sales_met = demand
                 shortage = 0
@@ -681,22 +690,34 @@ with tab4:
                 shortage = demand - opening_inv
                 closing_inv = 0
                 
+            # C) EVENING PHASE: Calculate Inventory Position and place orders if needed
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty
             
-            pipeline_status = "Clear"
+            order_placed_tonight = 0
             if inventory_position <= reorder_point:
-                delivery_day = day_counter + lead_time
-                pipeline_orders.append({'delivery_day': delivery_day, 'qty': order_qty})
-                pipeline_status = f"Placed Order (Arriving Day {delivery_day})"
+                order_placed_tonight = order_qty
+                # Set target delivery day to: Current Day + Lead Time + 1 Day morning
+                target_delivery = day_counter + lead_time + 1
+                pipeline_orders.append({'delivery_day': target_delivery, 'qty': order_qty})
+                pipeline_status = f"Placed Order (Arriving Day {target_delivery} Morning)"
             elif pipeline_qty > 0:
                 pipeline_status = f"{pipeline_qty} units en route"
+            else:
+                pipeline_status = "Clear"
 
             new_records.append({
-                'Day': day_counter, 'Opening Inventory': opening_inv, 'Demand Generated': demand,
-                'Sales Met': sales_met, 'Shortage': shortage, 'Closing Inventory': closing_inv,
+                'Day': day_counter,
+                'Opening Inventory': current_inv,      # Stock left over from yesterday evening
+                'Received Morning': arriving_qty,      # Stock added before business hours
+                'Demand Generated': demand,
+                'Sales Met': sales_met,
+                'Shortage': shortage,
+                'Closing Inventory': closing_inv,      # Stock remaining at close of business
+                'Order Placed Evening': order_placed_tonight,
                 'Pipeline Status': pipeline_status
             })
+            
             current_inv = closing_inv
 
         if new_records:
@@ -709,7 +730,8 @@ with tab4:
 
     if st.button("🔄 Reset Simulation Data", key="t4_reset_btn"):
         st.session_state.t4_history = pd.DataFrame(columns=[
-            'Day', 'Opening Inventory', 'Demand Generated', 'Sales Met', 'Shortage', 'Closing Inventory', 'Pipeline Status'
+            'Day', 'Opening Inventory', 'Received Morning', 'Demand Generated', 
+            'Sales Met', 'Shortage', 'Closing Inventory', 'Order Placed Evening', 'Pipeline Status'
         ])
         st.session_state.t4_day_counter = 0
         st.session_state.t4_current_inv = starting_inventory
@@ -734,7 +756,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & AUTOMATED BALANCED BINS
+    # SECTION 4: VISUALIZATIONS & TIMELINE LEDGERS
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -782,18 +804,9 @@ with tab4:
             fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig_inv, use_container_width=True)
 
-        # AUTOMATED PERFECT BALANCING ENGINE
         if dist_type == "Uniform":
             total_elements = high_bound - low_bound + 1
-            # Dynamically look for a common factor (5, 10, or total span split) to keep bins clean
-            if total_elements % 5 == 0:
-                bin_size = 5
-            elif total_elements % 10 == 0:
-                bin_size = 10
-            else:
-                bin_size = max(1, total_elements // 5)
-            
-            # Pad the edges by exactly 0.5 to cleanly center whole integers inside the bins
+            bin_size = 5 if total_elements % 5 == 0 else (10 if total_elements % 10 == 0 else max(1, total_elements // 5))
             breaks = np.arange(low_bound - 0.5, high_bound + 0.5 + bin_size, bin_size)
         else:
             breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
@@ -801,7 +814,6 @@ with tab4:
         with col_graph2:
             st.markdown("**Generated Demand Distribution**")
             fig_hist = go.Figure()
-            
             fig_hist.add_trace(go.Histogram(
                 x=df['Demand Generated'],
                 xbins=dict(start=breaks[0], end=breaks[-1], size=(breaks[1] - breaks[0])),
@@ -809,39 +821,45 @@ with tab4:
                 name='Demand Frequency',
                 marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
             ))
-            
             fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
         st.markdown("---")
 
-        # COLLAPSIBLE TABLE 1: Automated Balanced Data Table
+        # COLLAPSIBLE TABLE 1: Distribution Table
         with st.expander("📊 View Distribution Bin Analysis Data Table", expanded=False):
             counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
             total_elements_count = len(df)
             
             bin_records = []
             for i in range(len(counts)):
-                # Clean edge alignments back to pure integers for display labels
                 lower_lbl = int(np.ceil(edges[i]))
                 upper_lbl = int(np.floor(edges[i+1]))
-                
                 if dist_type == "Uniform" and (upper_lbl < low_bound or lower_lbl > high_bound):
                     continue
-                    
                 pct_share = (counts[i] / total_elements_count) * 100
-                
                 bin_records.append({
                     "Demand Bracket Range": f"{lower_lbl} to {upper_lbl} units",
                     "Days Sampled (Count)": int(counts[i]),
                     "Distribution Share (%)": f"{pct_share:.1f}%"
                 })
-                
             st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
 
-        # COLLAPSIBLE TABLE 2: Ledger
+        # COLLAPSIBLE TABLE 2: Updated Operations Ledger with clear Morning/Evening Timeline split
         with st.expander("📋 View Full Operations Ledger History Log", expanded=False):
-            st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
+            # Highlight timeline flow sorting latest days on top
+            display_df = df.copy().sort_values(by='Day', ascending=False)
+            st.dataframe(
+                display_df, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "Opening Inventory": st.column_config.NumberColumn("Opening Stock (Evening Prior)"),
+                    "Received Morning": st.column_config.NumberColumn("☀️ Arrived Morning"),
+                    "Order Placed Evening": st.column_config.NumberColumn("🌙 Ordered Evening"),
+                    "Closing Inventory": st.column_config.NumberColumn("Closing Stock")
+                }
+            )
 
     else:
         st.info("💡 Interaction Required: Execute steps using the gameplay action controls above to populate tables and performance metrics.")
