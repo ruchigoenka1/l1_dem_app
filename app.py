@@ -602,36 +602,36 @@ with tab4:
     st.header("🎯 Tab 4: Safety Stock Simulation Game")
     st.markdown("""
     **The Challenge:** Try running a business without stocking out! Balance the cost of holding inventory against the penalty of missing customer demand. 
-    Configure your demand data below, then play **day-by-day** or **simulate a massive batch of days** to see if your safety stock holds up.
     """)
 
     # =========================================================================
-    # SECTION 1: DATA CONFIGURATION
+    # SECTION 1: SIMPLIFIED DATA CONFIGURATION 
     # =========================================================================
     st.markdown("### 1. Data Configuration")
     
     dist_type = st.selectbox("Distribution Type", ["Uniform", "Normal"], index=0, key="t4_dist_type")
     
-    col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+    col_cfg1, col_cfg2 = st.columns(2)
 
     with col_cfg1:
         avg_demand = st.number_input("Average Demand", min_value=1, value=100, step=5, key="t4_avg_dem")
         
     with col_cfg2:
         if dist_type == "Uniform":
-            low_bound = st.number_input("Minimum Possible Demand", min_value=0, value=max(0, avg_demand - 20), key="t4_low")
-            std_dev = 0  
+            # Single variation input fields for +/- calculation
+            variation = st.number_input("Variation (± From Average)", min_value=0, value=30, step=5, key="t4_variation")
+            low_bound = max(0, avg_demand - variation)
+            high_bound = avg_demand + variation
+            std_dev = 0
         else:
-            std_dev = st.number_input("Std Dev (Variation)", min_value=0.0, value=15.0, step=1.0, key="t4_std_dev")
-            low_bound, high_bound = 0, 0 
+            std_dev = st.number_input("Std Dev (Variation σ)", min_value=0.0, value=15.0, step=1.0, key="t4_std_dev")
+            low_bound, high_bound, variation = 0, 0, 0
 
-    with col_cfg3:
-        if dist_type == "Uniform":
-            high_bound = st.number_input("Maximum Possible Demand", min_value=int(low_bound), value=avg_demand + 20, key="t4_high")
-        else:
-            st.markdown("<div style='padding-top: 25px; color: gray; font-size: 14px;'>N/A for Normal Dist</div>", unsafe_allow_html=True)
+    # Display calculated absolute limits subtly if Uniform is active
+    if dist_type == "Uniform":
+        st.markdown(f"🏼 *Calculated Range: **{low_bound}** to **{high_bound}** units*")
 
-    with st.expander("🛠️ Advanced Inventory Settings (Lead Time, Order Qty, ROP)", expanded=False):
+    with st.expander("🛠️ Advanced Inventory Settings", expanded=False):
         col_inv1, col_inv2, col_inv3 = st.columns(3)
         with col_inv1:
             reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
@@ -642,7 +642,7 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: CORE SIMULATION ENGINE & STATES
+    # SECTION 2: CORE SIMULATION ENGINE
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
@@ -652,7 +652,6 @@ with tab4:
         st.session_state.t4_current_inv = starting_inventory
         st.session_state.t4_pipeline_orders = [] 
 
-    # FIXED: The engine now reads directly from widgets variables dynamically inside the function execution block
     def run_simulation_steps(num_days):
         history_list = st.session_state.t4_history.to_dict('records')
         day_counter = st.session_state.t4_day_counter
@@ -663,15 +662,16 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
-            # Arriving shipments
+            # Incoming shipments arriving
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # FIXED: Forces numpy to evaluate a brand new random integer on every single day loop execution
+            # Precise mathematical simulation step assignment
             if dist_type == "Normal":
                 demand = max(0, int(np.random.normal(avg_demand, std_dev)))
             else:
+                # np.random.randint is high-bound exclusive, +1 ensures full inclusive reach
                 demand = int(np.random.randint(low_bound, high_bound + 1))
             
             # Fulfill demand
@@ -735,7 +735,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: LIVE CHARTS & TABLES
+    # SECTION 4: VISUALIZATIONS
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -768,7 +768,6 @@ with tab4:
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
             fig_inv = go.Figure()
-            
             fig_inv.add_trace(go.Scatter(
                 x=df['Day'], y=df['Closing Inventory'],
                 mode='lines+markers', name='Closing Inventory',
@@ -776,13 +775,11 @@ with tab4:
                 marker=dict(size=5, color='#3A96FF'),
                 fill='tozeroy', fillcolor='rgba(58, 150, 255, 0.1)'
             ))
-            
             fig_inv.add_trace(go.Scatter(
                 x=df['Day'], y=[reorder_point]*len(df),
                 mode='lines', name='Reorder Point Target (ROP)',
                 line=dict(color='#FF5A5A', width=2, dash='dash')
             ))
-            
             fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig_inv, use_container_width=True)
 
@@ -790,8 +787,19 @@ with tab4:
             st.markdown("**Generated Demand Distribution**")
             fig_hist = go.Figure()
             
+            # Map dynamic histogram bins based on parameters chosen to ensure flat distribution displays
+            if dist_type == "Uniform" and high_bound > low_bound:
+                hist_bins = dict(start=low_bound, end=high_bound + 1, size=max(1, (high_bound - low_bound) // 8))
+                autobinx_flag = False
+            else:
+                hist_bins = None
+                autobinx_flag = True
+
             fig_hist.add_trace(go.Histogram(
-                x=df['Demand Generated'], nbinsx=15, name='Demand Frequency',
+                x=df['Demand Generated'],
+                xbins=hist_bins,
+                autobinx=autobinx_flag,
+                name='Demand Frequency',
                 marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
             ))
             
@@ -800,6 +808,3 @@ with tab4:
 
         st.subheader("📋 Operations Ledger History")
         st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
-
-    else:
-        st.info("💡 Interaction Required: Execute steps using the gameplay action controls above to populate tables and performance metrics.")
