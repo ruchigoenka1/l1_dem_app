@@ -628,8 +628,7 @@ with tab4:
         )
         
     with c_calc3:
-        # Mathematical derivation of lead time parameters
-        # σ_LT = σ * sqrt(Lead Time)
+        # Mathematical derivation of lead time parameters: σ_LT = σ * sqrt(Lead Time)
         combined_sigma = calc_std_dev * np.sqrt(calc_lead_time)
         z_score = norm.ppf(service_level_pct / 100.0)
         
@@ -670,10 +669,12 @@ with tab4:
 
     with col_cfg2:
         st.markdown("**Inventory Parameters**")
-        # Explicit opening balance strategy set to stable 1.25 multiplier above ROP
+        # Defined FIRST to establish the variable context safely before it is called below
+        reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
+        
+        # Explicit opening balance strategy set to stable 1.25 multiplier above the user's ROP
         default_starting_inventory = int(np.ceil(1.25 * reorder_point)) if reorder_point > 0 else 300
         starting_inventory = st.number_input("Starting On-Hand Inventory", min_value=1, value=default_starting_inventory, step=10, key="t4_start_inv")
-        reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
 
     with col_cfg3:
         st.markdown("**Supply Constraints**")
@@ -782,7 +783,7 @@ with tab4:
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
         
-        # Absolute KPI metrics output format
+        # Performance Indicators: Output absolute totals (Physical vs Total shortfalls)
         total_shortages = df['Shortage'].sum()
         stockout_days = (df['Shortage'] > 0).sum()
         service_level = (df['Sales Met'].sum() / df['Demand Generated'].sum()) * 100 if df['Demand Generated'].sum() > 0 else 100
