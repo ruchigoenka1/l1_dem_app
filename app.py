@@ -605,7 +605,7 @@ with tab4:
     """)
 
     # =========================================================================
-    # SECTION 1: SIMPLIFIED DATA CONFIGURATION 
+    # SECTION 1: DATA CONFIGURATION 
     # =========================================================================
     st.markdown("### 1. Data Configuration")
     
@@ -640,7 +640,7 @@ with tab4:
             lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: CORE SIMULATION ENGINE (FIXED STATE HANDLING)
+    # SECTION 2: CORE SIMULATION ENGINE (WITH LOCAL RANDOM STATE ISOLATION)
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
@@ -651,11 +651,14 @@ with tab4:
         st.session_state.t4_pipeline_orders = [] 
 
     def run_simulation_steps(num_days):
-        # Explicitly pull references from state
         history_df = st.session_state.t4_history.copy()
         day_counter = st.session_state.t4_day_counter
         current_inv = st.session_state.t4_current_inv
         pipeline_orders = list(st.session_state.t4_pipeline_orders)
+        
+        # FIX: Instantiate an unseeded, independent random state engine local to this function call
+        # This completely breaks any ties with global np.random.seed lines elsewhere in the app.
+        rng = np.random.RandomState()
         
         new_records = []
 
@@ -663,17 +666,16 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
-            # Arriving shipments arriving
+            # Process incoming shipments arriving
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # CRITICAL FIX: Explicitly forcing fresh random generation detached from previous state cycles
+            # Use the isolated local generator engine ('rng' instead of 'np.random')
             if dist_type == "Normal":
-                demand = max(0, int(np.random.normal(float(avg_demand), float(std_dev))))
+                demand = max(0, int(rng.normal(float(avg_demand), float(std_dev))))
             else:
-                # Fresh, native random integer draw between low_bound and high_bound inclusive
-                demand = int(np.random.randint(int(low_bound), int(high_bound) + 1))
+                demand = int(rng.randint(int(low_bound), int(high_bound) + 1))
             
             # Fulfill demand
             if opening_inv >= demand:
@@ -704,7 +706,6 @@ with tab4:
             })
             current_inv = closing_inv
 
-        # Concat new entries and explicitly save back to session state to trigger visual re-renders
         if new_records:
             new_df = pd.DataFrame(new_records)
             st.session_state.t4_history = pd.concat([history_df, new_df], ignore_index=True)
@@ -740,7 +741,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & LIVE UPDATING BIN TABLES
+    # SECTION 4: VISUALIZATIONS & DYNAMIC BREAKDOWN
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -812,7 +813,7 @@ with tab4:
             fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
-        # Dynamic, fluid Distribution Analysis Table
+        # Distribution Share Table updates actively on each button step click
         st.markdown("### 📊 Distribution Bin Analysis")
         counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
         total_elements = len(df)
