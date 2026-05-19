@@ -599,90 +599,53 @@ with tab3:
 # tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Demand Analyzer", "Audit Log", "Safety Stock Game"])
 
 with tab4:
-    st.header("🎯 Tab 4: Safety Stock Simulation Game & Calculator")
+    st.header("🎯 Tab 4: Safety Stock Simulation Game")
     st.markdown("""
-    **The Challenge:** Balance the holding costs of excess inventory against the severe penalties of running out of stock! 
-    Use the **Smart Calculator** to determine your theoretical target boundaries, then push them to the **Simulation Engine** to play out the strategy day-by-day.
+    **The Challenge:** Try running a business without stocking out! Balance the cost of holding inventory against the penalty of missing customer demand. 
+    Configure your demand data below, then play **day-by-day** or **simulate a massive batch of days** to see if your safety stock holds up.
     """)
 
     # =========================================================================
-    # SECTION 1: SAFETY STOCK & REORDER POINT CALCULATOR
+    # SECTION 1: DATA CONFIGURATION (Single Phase - Styled like Screenshot 2)
     # =========================================================================
-    st.markdown("### 🧮 Phase 1: Safety Stock & ROP Calculator")
-    st.markdown("_Calculate your optimal targets mathematically before risking capital in the simulation._")
+    st.markdown("### 1. Data Configuration")
     
-    c_calc1, c_calc2, c_calc3 = st.columns(3)
+    # Row 1: Distribution Type selection (Defaulting to Uniform)
+    dist_type = st.selectbox("Distribution Type", ["Uniform", "Normal"], index=0, key="t4_dist_type")
     
-    with c_calc1:
-        calc_avg_demand = st.number_input("Expected Daily Demand", min_value=1.0, value=50.0, step=5.0, key="t4_c_avg")
-        calc_std_dev = st.number_input("Demand Standard Deviation (σ)", min_value=0.1, value=10.0, step=1.0, key="t4_c_std")
-    
-    with c_calc2:
-        calc_lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_c_lt")
-        # Service levels standard for normal distribution Z-scores
-        service_level_pct = st.selectbox(
-            "Desired Cycle Service Level", 
-            [80.0, 85.0, 90.0, 95.0, 98.0, 99.0, 99.9], 
-            index=3, 
-            key="t4_c_sl"
-        )
-        
-    with c_calc3:
-        # Mathematical derivation of lead time parameters: σ_LT = σ * sqrt(Lead Time)
-        combined_sigma = calc_std_dev * np.sqrt(calc_lead_time)
-        z_score = norm.ppf(service_level_pct / 100.0)
-        
-        calculated_ss = int(np.ceil(z_score * combined_sigma))
-        calculated_rop = int(np.ceil((calc_avg_demand * calc_lead_time) + calculated_ss))
-        
-        st.metric("Suggested Safety Stock", f"{calculated_ss} units", help="Z * σ * sqrt(Lead Time)")
-        st.metric("Calculated Reorder Point (ROP)", f"{calculated_rop} units", help="Lead Time Demand + Safety Stock")
-
-    # Action button to map parameters straight into the game engine
-    if st.button("📥 Apply Calculated Targets to Simulation Parameters", use_container_width=True, key="t4_apply_metrics"):
-        st.session_state["t4_avg_dem"] = int(calc_avg_demand)
-        st.session_state["t4_std_dev"] = float(calc_std_dev)
-        st.session_state["t4_rop"] = int(calculated_rop)
-        st.session_state["t4_lt"] = int(calc_lead_time)
-        st.success("Configured! Review parameters in Phase 2 below and start the simulation.")
-
-    st.markdown("---")
-
-    # =========================================================================
-    # SECTION 2: SIMULATION PARAMETERS CONFIGURATION
-    # =========================================================================
-    st.markdown("### ⚙️ Phase 2: Simulation Setup")
+    # Row 2: Dynamic parameters based on the chosen distribution
     col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
 
     with col_cfg1:
-        st.markdown("**Demand Distribution**")
-        avg_demand = st.number_input("Simulation Average Demand", min_value=1, value=50, step=5, key="t4_avg_dem")
-        dist_type = st.selectbox("Demand Distribution Type", ["Normal", "Uniform"], key="t4_dist_type")
+        avg_demand = st.number_input("Average Demand", min_value=1, value=100, step=5, key="t4_avg_dem")
         
-        if dist_type == "Normal":
-            std_dev = st.number_input("Standard Deviation (Variation)", min_value=0.0, value=10.0, step=1.0, key="t4_std_dev")
-            low_bound, high_bound = 0, 0
-        else:
-            low_bound = st.number_input("Minimum Possible Demand", min_value=0, value=max(0, avg_demand - 20), key="t4_low")
-            high_bound = st.number_input("Maximum Possible Demand", min_value=int(low_bound), value=avg_demand + 20, key="t4_high")
-            std_dev = 0
-
     with col_cfg2:
-        st.markdown("**Inventory Parameters**")
-        # Defined FIRST to establish the variable context safely before it is called below
-        reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
-        
-        # Explicit opening balance strategy set to stable 1.25 multiplier above the user's ROP
-        default_starting_inventory = int(np.ceil(1.25 * reorder_point)) if reorder_point > 0 else 300
-        starting_inventory = st.number_input("Starting On-Hand Inventory", min_value=1, value=default_starting_inventory, step=10, key="t4_start_inv")
+        if dist_type == "Uniform":
+            low_bound = st.number_input("Minimum Possible Demand", min_value=0, value=max(0, avg_demand - 20), key="t4_low")
+            std_dev = 0  # Placeholder
+        else:
+            std_dev = st.number_input("Std Dev (Variation)", min_value=0.0, value=15.0, step=1.0, key="t4_std_dev")
+            low_bound, high_bound = 0, 0  # Placeholders
 
     with col_cfg3:
-        st.markdown("**Supply Constraints**")
-        order_qty = st.number_input("Replenishment Batch Size (Q)", min_value=1, value=200, step=10, key="t4_q")
-        lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
+        if dist_type == "Uniform":
+            high_bound = st.number_input("Maximum Possible Demand", min_value=int(low_bound), value=avg_demand + 20, key="t4_high")
+        else:
+            st.markdown("<div style='padding-top: 25px; color: gray; font-size: 14px;'>N/A for Normal Dist</div>", unsafe_allow_html=True)
+
+    # Operational Parameters (Hidden cleanly inside an expander to keep the focus on Data Configuration)
+    with st.expander("🛠️ Advanced Inventory Settings (Lead Time, Order Qty, ROP)", expanded=False):
+        col_inv1, col_inv2, col_inv3 = st.columns(3)
+        with col_inv1:
+            reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
+        with col_inv2:
+            starting_inventory = st.number_input("Starting On-Hand Inventory", min_value=1, value=300, step=10, key="t4_start_inv")
+        with col_inv3:
+            order_qty = st.number_input("Replenishment Batch Size (Q)", min_value=1, value=200, step=10, key="t4_q")
+            lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 3: CORE SIMULATION ENGINE & STATES
+    # SECTION 2: CORE SIMULATION ENGINE & STATES
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
@@ -708,15 +671,15 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
-            # Process incoming shipments arriving at the start of this specific day
+            # Incoming shipments
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
             
-            # Extract daily demand value
+            # Demand Generation
             demand = generate_demand(dist_type, avg_demand, std_dev, low_bound, high_bound)
             
-            # Fulfill demand against physical on-hand safety stock
+            # Fulfill demand
             if opening_inv >= demand:
                 sales_met = demand
                 shortage = 0
@@ -726,7 +689,7 @@ with tab4:
                 shortage = demand - opening_inv
                 closing_inv = 0
                 
-            # Monitor replenishment positions (Physical On Hand + Remaining Quantities En Route)
+            # Pipeline Monitoring
             pipeline_qty = sum(order['qty'] for order in pipeline_orders)
             inventory_position = closing_inv + pipeline_qty
             
@@ -750,8 +713,8 @@ with tab4:
         st.session_state.t4_current_inv = current_inv
         st.session_state.t4_pipeline_orders = pipeline_orders
 
-    # Reset Action Engine
-    if st.button("🔄 Reset Game Variables", key="t4_reset_btn"):
+    # Reset Button
+    if st.button("🔄 Reset Simulation Data", key="t4_reset_btn"):
         st.session_state.t4_history = pd.DataFrame(columns=[
             'Day', 'Opening Inventory', 'Demand Generated', 'Sales Met', 'Shortage', 'Closing Inventory', 'Pipeline Status'
         ])
@@ -763,9 +726,9 @@ with tab4:
     st.markdown("---")
 
     # =========================================================================
-    # SECTION 4: INTERACTIVE GAMEPLAY BUTTONS
+    # SECTION 3: INTERACTIVE GAMEPLAY BUTTONS
     # =========================================================================
-    st.subheader("🕹️ Phase 3: Gameplay Execution")
+    st.subheader("🕹️ Simulation Actions")
     col_btn1, col_btn2, col_space = st.columns([1, 1.5, 2])
 
     with col_btn1:
@@ -778,12 +741,11 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 5: DASHBOARD DISPLAY, VISUALIZATIONS & LOGS
+    # SECTION 4: LIVE CHARTS & TABLES
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
         
-        # Performance Indicators: Output absolute totals (Physical vs Total shortfalls)
         total_shortages = df['Shortage'].sum()
         stockout_days = (df['Shortage'] > 0).sum()
         service_level = (df['Sales Met'].sum() / df['Demand Generated'].sum()) * 100 if df['Demand Generated'].sum() > 0 else 100
