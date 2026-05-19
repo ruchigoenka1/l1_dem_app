@@ -660,6 +660,7 @@ with tab4:
             day_counter += 1
             opening_inv = current_inv
             
+            # Incoming shipments arriving
             arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
             opening_inv += arriving_qty
             pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
@@ -728,7 +729,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & BIN DATA TABLE
+    # SECTION 4: VISUALIZATIONS & LIVE BIN TABLES
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -776,14 +777,17 @@ with tab4:
             fig_inv.update_layout(**shared_layout, xaxis_title="Day", yaxis_title="Units", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
             st.plotly_chart(fig_inv, use_container_width=True)
 
-        # Calculate exact matching mathematical cutoffs for the distribution table layout
+        # FIXED LOGIC: Generate perfect, clean integer cuts for the bins based on current simulation logs
+        sim_min = int(df['Demand Generated'].min())
+        sim_max = int(df['Demand Generated'].max())
+        
         if dist_type == "Uniform":
-            total_range = high_bound - low_bound + 1
-            bin_size = 5 if total_range % 5 == 0 else max(1, total_range // 8)
-            breaks = np.arange(low_bound - 0.5, high_bound + 0.5 + bin_size, bin_size)
+            # Form clean, distinct integer boundaries across the true data spread
+            num_bins = 6
+            breaks = np.linspace(low_bound, high_bound, num_bins + 1)
         else:
-            # Clean standard normal splits for standard deviation bounds
-            breaks = np.histogram_bin_edges(df['Demand Generated'], bins='sturges')
+            num_bins = 7
+            breaks = np.linspace(sim_min, sim_max, num_bins + 1)
 
         with col_graph2:
             st.markdown("**Generated Demand Distribution**")
@@ -791,8 +795,8 @@ with tab4:
             
             fig_hist.add_trace(go.Histogram(
                 x=df['Demand Generated'],
-                xbins=dict(start=breaks[0], end=breaks[-1], size=breaks[1]-breaks[0]) if dist_type == "Uniform" else None,
-                autobinx=False if dist_type == "Uniform" else True,
+                xbins=dict(start=breaks[0], end=breaks[-1], size=(breaks[1] - breaks[0])),
+                autobinx=False,
                 name='Demand Frequency',
                 marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
             ))
@@ -800,17 +804,17 @@ with tab4:
             fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
-        # Dynamic Bin Data Frequency Breakdown Table Generation
+        # FIXED LOGIC: Dynamic distribution breakdown calculations update on every click
         st.markdown("### 📊 Distribution Bin Analysis")
-        counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
         
-        bin_records = []
+        # Calculate frequencies using clean, updated simulation runtime data
+        counts, edges = np.histogram(df['Demand Generated'], bins=breaks)
         total_elements = len(df)
         
+        bin_records = []
         for i in range(len(counts)):
-            # Round bracket titles gracefully to hide floating point adjustments
-            lower_lbl = int(np.ceil(edges[i]))
-            upper_lbl = int(np.floor(edges[i+1]))
+            lower_lbl = int(np.round(edges[i]))
+            upper_lbl = int(np.round(edges[i+1]))
             pct_share = (counts[i] / total_elements) * 100
             
             bin_records.append({
@@ -819,8 +823,7 @@ with tab4:
                 "Distribution Share (%)": f"{pct_share:.1f}%"
             })
             
-        bin_df = pd.DataFrame(bin_records)
-        st.dataframe(bin_df, use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(bin_records), use_container_width=True, hide_index=True)
 
         st.subheader("📋 Operations Ledger History")
         st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
