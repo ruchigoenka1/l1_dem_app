@@ -606,7 +606,7 @@ with tab4:
     """)
 
     # =========================================================================
-    # SECTION 1: DATA CONFIGURATION (UPDATED FOR 0 DEFAULT VARIATION)
+    # SECTION 1: DATA CONFIGURATION 
     # =========================================================================
     st.markdown("### 1. Data Configuration")
     
@@ -619,13 +619,11 @@ with tab4:
         
     with col_cfg2:
         if dist_type == "Uniform":
-            # Changed min_value to 0 and default value to 0
             variation = st.number_input("Variation (± From Average)", min_value=0, value=0, step=5, key="t4_variation")
             low_bound = max(0, avg_demand - variation)
             high_bound = avg_demand + variation
             std_dev = 0
         else:
-            # Changed min_value to 0.0 and default value to 0.0
             std_dev = st.number_input("Std Dev (Variation σ)", min_value=0.0, value=0.0, step=1.0, key="t4_std_dev")
             low_bound, high_bound, variation = 0, 0, 0
 
@@ -799,7 +797,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & TIMELINE LEDGERS
+    # SECTION 4: VISUALIZATIONS & TIMELINE LEDGERS (FIXED X-AXIS MULTIPLE VALUES)
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -853,7 +851,6 @@ with tab4:
             fig_inv.update_yaxes(range=[lowest_point, highest_point])
             st.plotly_chart(fig_inv, use_container_width=True)
 
-        # PROTECTED BINNING CALCULATOR (Handles zero variation charts without crashing)
         is_zero_variation = (dist_type == "Uniform" and variation == 0) or (dist_type == "Normal" and std_dev == 0.0)
 
         with col_graph2:
@@ -861,13 +858,15 @@ with tab4:
             fig_hist = go.Figure()
             
             if is_zero_variation:
-                # Force a clean, solid single bar display right on top of static demand value
                 fig_hist.add_trace(go.Bar(
                     x=[avg_demand], y=[len(df)], name='Demand Frequency',
                     marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5)),
                     width=[4.0]
                 ))
-                fig_hist.update_layout(**shared_layout, xaxis=dict(range=[avg_demand - 10, avg_demand + 10], tickvals=[avg_demand]))
+                # Base styling dict gets unpacked safely without passing secondary explicit dictionaries
+                fig_hist.update_layout(**shared_layout, bargap=0.08, yaxis_title="Days Logged", showlegend=False)
+                # FIXED MECHANISM: Custom single axis adjustments are now chained safely via update method tracking
+                fig_hist.update_xaxes(range=[avg_demand - 10, avg_demand + 10], tickvals=[avg_demand], title_text="Demand Bracket")
             else:
                 if dist_type == "Uniform":
                     total_elements = high_bound - low_bound + 1
@@ -881,8 +880,8 @@ with tab4:
                     autobinx=False, name='Demand Frequency',
                     marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5))
                 ))
+                fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
                 
-            fig_hist.update_layout(**shared_layout, bargap=0.08, xaxis_title="Demand Bracket", yaxis_title="Days Logged", showlegend=False)
             st.plotly_chart(fig_hist, use_container_width=True)
 
         st.markdown("---")
