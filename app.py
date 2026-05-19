@@ -606,7 +606,7 @@ with tab4:
     """)
 
     # =========================================================================
-    # SECTION 1: DATA CONFIGURATION 
+    # SECTION 1: DATA CONFIGURATION
     # =========================================================================
     st.markdown("### 1. Data Configuration")
     
@@ -797,7 +797,7 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & TIMELINE LEDGERS (FIXED X-AXIS MULTIPLE VALUES)
+    # SECTION 4: VISUALIZATIONS & TIMELINE LEDGERS (WITH 5-COLUMN MATRIX)
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
@@ -808,17 +808,19 @@ with tab4:
             df['Total Pipeline Inventory'] = 0
         
         total_shortages = df['Shortage'].sum()
-        stockout_days = (df['Shortage'] > 0).sum()
+        stockout_days = int((df['Shortage'] > 0).sum())
         service_level = (df['Sales Met'].sum() / df['Demand Generated'].sum()) * 100 if df['Demand Generated'].sum() > 0 else 100
 
         st.markdown("---")
         st.subheader("📊 Live Performance Scoreboard")
         
-        m1, m2, m3, m4 = st.columns(4)
+        # Split scoreboard into 5 clean columns
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Current Day", int(df['Day'].iloc[-1]))
-        m2.metric("Closing Inventory Balance", f"{int(df['Closing Inventory'].iloc[-1])} units")
-        m3.metric("Service Level Achievement", f"{service_level:.1f}%")
-        m4.metric("Active Pipeline Inventory", f"{int(df['Total Pipeline Inventory'].iloc[-1])} units")
+        m2.metric("Closing Stock", f"{int(df['Closing Inventory'].iloc[-1])} units")
+        m3.metric("Service Level", f"{service_level:.1f}%")
+        m4.metric("Pipeline Stock", f"{int(df['Total Pipeline Inventory'].iloc[-1])} units")
+        m5.metric("Stock Out Days", f"{stockout_days} days", delta=f"{int(total_shortages)} units missed", delta_color="inverse")
 
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
@@ -863,9 +865,7 @@ with tab4:
                     marker=dict(color='rgba(58, 150, 255, 0.4)', line=dict(color='#3A96FF', width=1.5)),
                     width=[4.0]
                 ))
-                # Base styling dict gets unpacked safely without passing secondary explicit dictionaries
                 fig_hist.update_layout(**shared_layout, bargap=0.08, yaxis_title="Days Logged", showlegend=False)
-                # FIXED MECHANISM: Custom single axis adjustments are now chained safely via update method tracking
                 fig_hist.update_xaxes(range=[avg_demand - 10, avg_demand + 10], tickvals=[avg_demand], title_text="Demand Bracket")
             else:
                 if dist_type == "Uniform":
