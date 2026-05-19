@@ -16,7 +16,7 @@ st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
 st.title("🚀 Supply Chain Analytics Platform")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "📦 Inventory Optimization"])
+tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "Demand Simulator Game"])
 
 with tab1:
     st.header("The Basic Thumb Rule Used For Inventory Planning")
@@ -594,6 +594,252 @@ with tab3:
         with st.expander("📂 View Raw Data Table"):
             st.dataframe(df_truth, use_container_width=True)
 
+# Assuming your layout structure looks like this:
+# tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Demand Analyzer", "Audit Log", "Safety Stock Game"])
+
 with tab4:
-    st.header("Inventory Optimization Insights")
-    st.info("Safety stock and reorder point metrics can be implemented here.")
+    st.header("🎯 Tab 4: Safety Stock Simulation Game & Calculator")
+    st.markdown("""
+    **The Challenge:** Balance the holding costs of excess inventory against the severe penalties of running out of stock! 
+    Use the **Smart Calculator** to determine your theoretical target boundaries, then push them to the **Simulation Engine** to play out the strategy day-by-day.
+    """)
+
+    # =========================================================================
+    # SECTION 1: SAFETY STOCK & REORDER POINT CALCULATOR
+    # =========================================================================
+    st.markdown("### 🧮 Phase 1: Safety Stock & ROP Calculator")
+    st.markdown("_Calculate your optimal targets mathematically before risking capital in the simulation._")
+    
+    c_calc1, c_calc2, c_calc3 = st.columns(3)
+    
+    with c_calc1:
+        calc_avg_demand = st.number_input("Expected Daily Demand", min_value=1.0, value=50.0, step=5.0, key="t4_c_avg")
+        calc_std_dev = st.number_input("Demand Standard Deviation (σ)", min_value=0.1, value=10.0, step=1.0, key="t4_c_std")
+    
+    with c_calc2:
+        calc_lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_c_lt")
+        # Service levels standard for normal distribution Z-scores
+        service_level_pct = st.selectbox(
+            "Desired Cycle Service Level", 
+            [80.0, 85.0, 90.0, 95.0, 98.0, 99.0, 99.9], 
+            index=3, 
+            key="t4_c_sl"
+        )
+        
+    with c_calc3:
+        # Mathematical derivation of lead time parameters
+        # σ_LT = σ * sqrt(Lead Time)
+        combined_sigma = calc_std_dev * np.sqrt(calc_lead_time)
+        z_score = norm.ppf(service_level_pct / 100.0)
+        
+        calculated_ss = int(np.ceil(z_score * combined_sigma))
+        calculated_rop = int(np.ceil((calc_avg_demand * calc_lead_time) + calculated_ss))
+        
+        st.metric("Suggested Safety Stock", f"{calculated_ss} units", help="Z * σ * sqrt(Lead Time)")
+        st.metric("Calculated Reorder Point (ROP)", f"{calculated_rop} units", help="Lead Time Demand + Safety Stock")
+
+    # Action button to map parameters straight into the game engine
+    if st.button("📥 Apply Calculated Targets to Simulation Parameters", use_container_width=True, key="t4_apply_metrics"):
+        st.session_state["t4_avg_dem"] = int(calc_avg_demand)
+        st.session_state["t4_std_dev"] = float(calc_std_dev)
+        st.session_state["t4_rop"] = int(calculated_rop)
+        st.session_state["t4_lt"] = int(calc_lead_time)
+        st.success("Configured! Review parameters in Phase 2 below and start the simulation.")
+
+    st.markdown("---")
+
+    # =========================================================================
+    # SECTION 2: SIMULATION PARAMETERS CONFIGURATION
+    # =========================================================================
+    st.markdown("### ⚙️ Phase 2: Simulation Setup")
+    col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+
+    with col_cfg1:
+        st.markdown("**Demand Distribution**")
+        avg_demand = st.number_input("Simulation Average Demand", min_value=1, value=50, step=5, key="t4_avg_dem")
+        dist_type = st.selectbox("Demand Distribution Type", ["Normal", "Uniform"], key="t4_dist_type")
+        
+        if dist_type == "Normal":
+            std_dev = st.number_input("Standard Deviation (Variation)", min_value=0.0, value=10.0, step=1.0, key="t4_std_dev")
+            low_bound, high_bound = 0, 0
+        else:
+            low_bound = st.number_input("Minimum Possible Demand", min_value=0, value=max(0, avg_demand - 20), key="t4_low")
+            high_bound = st.number_input("Maximum Possible Demand", min_value=int(low_bound), value=avg_demand + 20, key="t4_high")
+            std_dev = 0
+
+    with col_cfg2:
+        st.markdown("**Inventory Parameters**")
+        # Explicit opening balance strategy set to stable 1.25 multiplier above ROP
+        default_starting_inventory = int(np.ceil(1.25 * reorder_point)) if reorder_point > 0 else 300
+        starting_inventory = st.number_input("Starting On-Hand Inventory", min_value=1, value=default_starting_inventory, step=10, key="t4_start_inv")
+        reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
+
+    with col_cfg3:
+        st.markdown("**Supply Constraints**")
+        order_qty = st.number_input("Replenishment Batch Size (Q)", min_value=1, value=200, step=10, key="t4_q")
+        lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
+
+    # =========================================================================
+    # SECTION 3: CORE SIMULATION ENGINE & STATES
+    # =========================================================================
+    if 't4_history' not in st.session_state:
+        st.session_state.t4_history = pd.DataFrame(columns=[
+            'Day', 'Opening Inventory', 'Demand Generated', 'Sales Met', 'Shortage', 'Closing Inventory', 'Pipeline Status'
+        ])
+        st.session_state.t4_day_counter = 0
+        st.session_state.t4_current_inv = starting_inventory
+        st.session_state.t4_pipeline_orders = [] 
+
+    def generate_demand(dist, avg, s_dev, low, high):
+        if dist == "Normal":
+            return max(0, int(np.random.normal(avg, s_dev)))
+        else:
+            return int(np.random.randint(low, high + 1))
+
+    def run_simulation_steps(num_days):
+        history_list = st.session_state.t4_history.to_dict('records')
+        day_counter = st.session_state.t4_day_counter
+        current_inv = st.session_state.t4_current_inv
+        pipeline_orders = st.session_state.t4_pipeline_orders
+
+        for _ in range(num_days):
+            day_counter += 1
+            opening_inv = current_inv
+            
+            # Process incoming shipments arriving at the start of this specific day
+            arriving_qty = sum(order['qty'] for order in pipeline_orders if order['delivery_day'] == day_counter)
+            opening_inv += arriving_qty
+            pipeline_orders = [order for order in pipeline_orders if order['delivery_day'] != day_counter]
+            
+            # Extract daily demand value
+            demand = generate_demand(dist_type, avg_demand, std_dev, low_bound, high_bound)
+            
+            # Fulfill demand against physical on-hand safety stock
+            if opening_inv >= demand:
+                sales_met = demand
+                shortage = 0
+                closing_inv = opening_inv - demand
+            else:
+                sales_met = opening_inv
+                shortage = demand - opening_inv
+                closing_inv = 0
+                
+            # Monitor replenishment positions (Physical On Hand + Remaining Quantities En Route)
+            pipeline_qty = sum(order['qty'] for order in pipeline_orders)
+            inventory_position = closing_inv + pipeline_qty
+            
+            pipeline_status = "Clear"
+            if inventory_position <= reorder_point:
+                delivery_day = day_counter + lead_time
+                pipeline_orders.append({'delivery_day': delivery_day, 'qty': order_qty})
+                pipeline_status = f"Placed Order (Arriving Day {delivery_day})"
+            elif pipeline_qty > 0:
+                pipeline_status = f"{pipeline_qty} units en route"
+
+            history_list.append({
+                'Day': day_counter, 'Opening Inventory': opening_inv, 'Demand Generated': demand,
+                'Sales Met': sales_met, 'Shortage': shortage, 'Closing Inventory': closing_inv,
+                'Pipeline Status': pipeline_status
+            })
+            current_inv = closing_inv
+
+        st.session_state.t4_history = pd.DataFrame(history_list)
+        st.session_state.t4_day_counter = day_counter
+        st.session_state.t4_current_inv = current_inv
+        st.session_state.t4_pipeline_orders = pipeline_orders
+
+    # Reset Action Engine
+    if st.button("🔄 Reset Game Variables", key="t4_reset_btn"):
+        st.session_state.t4_history = pd.DataFrame(columns=[
+            'Day', 'Opening Inventory', 'Demand Generated', 'Sales Met', 'Shortage', 'Closing Inventory', 'Pipeline Status'
+        ])
+        st.session_state.t4_day_counter = 0
+        st.session_state.t4_current_inv = starting_inventory
+        st.session_state.t4_pipeline_orders = []
+        st.rerun()
+
+    st.markdown("---")
+
+    # =========================================================================
+    # SECTION 4: INTERACTIVE GAMEPLAY BUTTONS
+    # =========================================================================
+    st.subheader("🕹️ Phase 3: Gameplay Execution")
+    col_btn1, col_btn2, col_space = st.columns([1, 1.5, 2])
+
+    with col_btn1:
+        if st.button("☀️ Next Day (Single Step)", use_container_width=True, key="t4_step_btn"):
+            run_simulation_steps(1)
+
+    with col_btn2:
+        sim_days = st.number_input("Days to fast-forward", min_value=2, max_value=365, value=30, step=5, label_visibility="collapsed", key="t4_sim_days_input")
+        if st.button(f"⏩ Simulate {sim_days} Days", use_container_width=True, key="t4_batch_btn"):
+            run_simulation_steps(sim_days)
+
+    # =========================================================================
+    # SECTION 5: DASHBOARD DISPLAY, VISUALIZATIONS & LOGS
+    # =========================================================================
+    if not st.session_state.t4_history.empty:
+        df = st.session_state.t4_history
+        
+        # Absolute KPI metrics output format
+        total_shortages = df['Shortage'].sum()
+        stockout_days = (df['Shortage'] > 0).sum()
+        service_level = (df['Sales Met'].sum() / df['Demand Generated'].sum()) * 100 if df['Demand Generated'].sum() > 0 else 100
+
+        st.markdown("---")
+        st.subheader("📊 Live Performance Scoreboard")
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Current Day", int(df['Day'].iloc[-1]))
+        m2.metric("Closing Inventory Balance", f"{int(df['Closing Inventory'].iloc[-1])} units")
+        m3.metric("Service Level Achievement", f"{service_level:.1f}%")
+        m4.metric("Total Stockout Events", f"{stockout_days} days", delta=f"{int(total_shortages)} units missed", delta_color="inverse")
+
+        st.subheader("📈 Real-Time Tracking Analytics")
+        col_graph1, col_graph2 = st.columns(2)
+
+        with col_graph1:
+            st.markdown("**Inventory Tracking Over Time**")
+            fig_inv = go.Figure()
+            fig_inv.add_trace(go.Scatter(
+                x=df['Day'], y=df['Closing Inventory'],
+                mode='lines+markers', name='Closing Inventory',
+                line=dict(color='#1f77b4', width=2)
+            ))
+            fig_inv.add_trace(go.Scatter(
+                x=df['Day'], y=[reorder_point]*len(df),
+                mode='lines', name='Reorder Point Target (ROP)',
+                line=dict(color='#ef553b', dash='dash')
+            ))
+            fig_inv.update_layout(
+                xaxis_title="Day", yaxis_title="Units",
+                margin=dict(l=20, r=20, t=20, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                plot_bgcolor="white"
+            )
+            fig_inv.update_yaxes(showgrid=True, gridcolor='#f0f2f6')
+            fig_inv.update_xaxes(showgrid=True, gridcolor='#f0f2f6')
+            st.plotly_chart(fig_inv, use_container_width=True)
+
+        with col_graph2:
+            st.markdown("**Generated Demand Distribution**")
+            fig_hist = go.Figure()
+            fig_hist.add_trace(go.Histogram(
+                x=df['Demand Generated'], nbinsx=15,
+                marker_color='#abc9e9',
+                marker=dict(line=dict(color='#1f77b4', width=1))
+            ))
+            fig_hist.update_layout(
+                xaxis_title="Demand Bracket", yaxis_title="Days Logged",
+                margin=dict(l=20, r=20, t=20, b=20),
+                plot_bgcolor="white"
+            )
+            fig_hist.update_yaxes(showgrid=True, gridcolor='#f0f2f6')
+            fig_hist.update_xaxes(showgrid=True, gridcolor='#f0f2f6')
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+        st.subheader("📋 Operations Ledger History")
+        st.dataframe(df.sort_values(by='Day', ascending=False), use_container_width=True, hide_index=True)
+
+    else:
+        st.info("💡 Interaction Required: Execute steps using the gameplay action controls above to populate tables and performance metrics.")
