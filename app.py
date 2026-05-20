@@ -1081,12 +1081,33 @@ with tab5:
             "Unit_Cost": [25.0] * 365
         })
 
-    # --- STEP 2.5: COLLAPSIBLE HISTOGRAM BREAKDOWN ---
+    # --- STEP 3: STATISTICAL BREAKDOWN ---
+    total_demand = df["Demand_Qty"].sum()
+    avg_daily_demand = df["Demand_Qty"].mean()
+    std_daily_demand = df["Demand_Qty"].std()
+    avg_unit_cost = df["Unit_Cost"].mean()
+    
+    annual_demand = avg_daily_demand * 365
+    unit_holding_cost = (holding_fixed / max(1, total_demand)) + (avg_unit_cost * holding_var_pct)
+    
+    lt_demand_mean = avg_daily_demand * lead_time_days
+    lt_demand_std = std_daily_demand * np.sqrt(lead_time_days)
+    
+    z_val = stats.norm.ppf(service_level)
+
+    # --- STEP 3.5: COLLAPSIBLE HISTOGRAM BREAKDOWN WITH LIVE DEMAND STATS ---
     with st.expander("📊 View Demand Distribution & Volatility Histogram", expanded=False):
         st.markdown(
             "An open view of historical demand frequency. A highly skewed distribution or multiple remote "
             "peaks indicates an erratic buying pattern that standard average-based calculations typically fail to manage."
         )
+        
+        # Display baseline metric averages above the chart container
+        stat_col1, stat_col2, stat_col3 = st.columns(3)
+        stat_col1.metric("Average Daily Demand", f"{avg_daily_demand:.2f} units")
+        stat_col2.metric("Demand Variability (Std Dev)", f"{std_daily_demand:.2f} units")
+        stat_col3.metric("Coefficient of Variation (CV)", f"{(std_daily_demand / max(0.1, avg_daily_demand)):.2f}")
+        st.markdown("---")
         
         show_zeros = st.checkbox("Include zero-demand days in distribution", value=True)
         plot_df = df if show_zeros else df[df["Demand_Qty"] > 0]
@@ -1098,7 +1119,7 @@ with tab5:
             hist_fig.add_trace(go.Histogram(
                 x=plot_df["Demand_Qty"],
                 name="Demand Frequency",
-                marker_color='#1F77B4',  # Strong royal blue
+                marker_color='#1F77B4',  
                 opacity=0.75,
                 xbins=dict(start=0, size=max(1, int(plot_df["Demand_Qty"].max() / 20)))
             ))
@@ -1117,30 +1138,80 @@ with tab5:
             hist_fig.update_xaxes(showgrid=True, gridcolor='#E5E5E5')
             
             st.plotly_chart(hist_fig, use_container_width=True)
+    
+    # --- STEP 4: MODEL RECOMMENDATIONS & PARAMETER OVERRIDES ---
+    st.subheader("3. Optimization Recommendations & Policy Adjustment")
+    st.markdown("Review mathematically optimal baselines below. Customize the inputs to run simulations for testing variations.")
+    
+    # Pre-calculate theoretical optimal baselines to feed defaults safely
+    raw_optimal_q = np.sqrt((2 * annual_demand * ordering_cost) / unit_holding_cost)
+    
+    if review_system == "Continuous Review (Q, R)":
+        raw_safety_stock = z_val * lt_demand_std
+        raw_trigger_point = lt_demand_mean + raw_safety_stock
+        
+        # Interactive UI Overrides with optimized defaults
+        adjust_col1, adjust_col2 = st.columns(2)
+        with adjust_col1:
+            final_q = st.number_input("Target Order Quantity (Q)", min_value=1, value=max(1, int(raw_optimal_q)), step=10)
+            st.caption(f"💡 *Mathematically Optimal (EOQ): {int(raw_optimal_q):,} units*")
+        with adjust_col2:
+            final_rop = st.number_input("Reorder Point (ROP)", min_value=0, value=max(0, int(raw_trigger_point)), step=10)
+            st.caption(f"💡 *Mathematically Optimal (ROP): {int(raw_trigger_point):,} units*")
+            
+        # Finalized policy attributes based on overrides
+        policy_safety_stock = final_rop - lt_demand_mean
+        opt_max_inventory = final_q + max(0.0, policy_safety_stock)
+        opt_avg_inventory = (final_q / 2) + max(0.0, policy_safety_stock)
+        expected_orders = (annual_demand / final_q)
+        
+        optimal_ordering_cost = expected_orders * ordering_cost
+        optimal_holding_cost = opt_avg_inventory * unit_holding_cost
+        optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
+        
+        opt_stockout_days = expected_orders * (1.0 - service_level)
+        opt_fill_rate = service_level
+        
+    else:  # Periodic Review (P, T)
+        raw_p_years = np.sqrt((2 * ordering_cost) / (unit_holding_cost * annual_demand))
+        raw_p_days = max(1, int(raw_p_years * 365))
+        
+        raw_total_horizon = raw_p_days + lead_time_days
+        raw_p_lt_std = std_daily_demand * np.sqrt(raw_total_horizon)
+        raw_safety_stock = z_val * raw_p_lt_std
+        raw_order_up_to = (avg_daily_demand * raw_total_horizon) + raw_safety_stock
+        
+        # Interactive UI Overrides with optimized defaults
+        adjust_col1, adjust_col2 = st.columns(2)
+        with adjust_col1:
+            final_p_days = st.number_input("Review Period Cycle (P in Days)", min_value=1, value=int(raw_p_days), step=1)
+            st.caption(f"💡 *Mathematically Optimal Cycle: {int(raw_p_days)} Days*")
+        with adjust_col2:
+            final_target_t = st.number_input("Order Up-To Level (T)", min_value=1, value=max(1, int(raw_order_up_to)), step=10)
+            st.caption(f"💡 *Mathematically Optimal Target (T): {int(raw_order_up_to):,} units*")
+            
+        # Finalized policy attributes based on overrides
+        adjusted_horizon = final_p_days + lead_time_days
+        policy_safety_stock = final_target_t - (avg_daily_demand * adjusted_horizon)
+        
+        equivalent_q = avg_daily_demand * final_p_days
+        opt_max_inventory = final_target_t
+        opt_avg_inventory = (equivalent_q / 2) + max(0.0, policy_safety_stock)
+        expected_orders = (365 / final_p_days)
+        
+        optimal_ordering_cost = expected_orders * ordering_cost
+        optimal_holding_cost = opt_avg_inventory * unit_holding_cost
+        optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
+        
+        opt_stockout_days = expected_orders * (1.0 - service_level)
+        opt_fill_rate = service_level
 
-    # --- STEP 3: STATISTICAL BREAKDOWN ---
-    total_demand = df["Demand_Qty"].sum()
-    avg_daily_demand = df["Demand_Qty"].mean()
-    std_daily_demand = df["Demand_Qty"].std()
-    avg_unit_cost = df["Unit_Cost"].mean()
-    
-    annual_demand = avg_daily_demand * 365
-    unit_holding_cost = (holding_fixed / max(1, total_demand)) + (avg_unit_cost * holding_var_pct)
-    
-    lt_demand_mean = avg_daily_demand * lead_time_days
-    lt_demand_std = std_daily_demand * np.sqrt(lead_time_days)
-    
-    z_val = stats.norm.ppf(service_level)
-    
-    # --- STEP 4: MODEL RECOMMENDATIONS & HISTORICAL SIMULATION ---
-    st.subheader("3. Optimization Recommendations")
-    
-    # Calculate Actuals from Ledger Data
+    # --- STEP 5: DAILY SIMULATION BACKEND (HISTORICAL ACTUALS) ---
     actual_orders_placed = np.count_nonzero(df["Purchase_Qty"])
     actual_total_ordering_cost = actual_orders_placed * ordering_cost
     
     # Day-by-Day Balance Trace Simulation
-    current_inv_act = 1.25 * lt_demand_mean  # Starts safely above typical demand triggers
+    current_inv_act = 1.25 * lt_demand_mean  
     inv_levels_act = []
     stockout_days_act = 0
     unfulfilled_demand_act = 0
@@ -1166,67 +1237,17 @@ with tab5:
     actual_total_holding_cost = actual_avg_inventory * unit_holding_cost
     actual_total_cost = actual_total_ordering_cost + actual_total_holding_cost
 
-    # Process Optimal Models & Predict Performance
-    if review_system == "Continuous Review (Q, R)":
-        optimal_q = np.sqrt((2 * annual_demand * ordering_cost) / unit_holding_cost)
-        safety_stock = z_val * lt_demand_std
-        reorder_point = lt_demand_mean + safety_stock
-        
-        optimal_ordering_cost = (annual_demand / optimal_q) * ordering_cost
-        optimal_holding_cost = ((optimal_q / 2) + safety_stock) * unit_holding_cost
-        optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
-        
-        opt_max_inventory = optimal_q + safety_stock
-        opt_avg_inventory = (optimal_q / 2) + safety_stock
-        expected_orders = (annual_demand / optimal_q)
-        
-        opt_stockout_days = expected_orders * (1.0 - service_level)
-        opt_fill_rate = service_level
-        
-        rec_col1, rec_col2, rec_col3 = st.columns(3)
-        rec_col1.metric("Recommended Order Quantity (Q)", f"{int(optimal_q)} units")
-        rec_col2.metric("Reorder Point (ROP)", f"{int(reorder_point)} units")
-        rec_col3.metric("Safety Stock Allocated", f"{int(safety_stock)} units")
-        
-    else:  # Periodic Review (P, T)
-        optimal_p_years = np.sqrt((2 * ordering_cost) / (unit_holding_cost * annual_demand))
-        optimal_p_days = max(1, int(optimal_p_years * 365))
-        
-        total_time_horizon = optimal_p_days + lead_time_days
-        p_lt_demand_mean = avg_daily_demand * total_time_horizon
-        p_lt_demand_std = std_daily_demand * np.sqrt(total_time_horizon)
-        
-        safety_stock = z_val * p_lt_demand_std
-        order_up_to = p_lt_demand_mean + safety_stock
-        
-        optimal_q = avg_daily_demand * optimal_p_days
-        optimal_ordering_cost = (365 / optimal_p_days) * ordering_cost
-        optimal_holding_cost = ((optimal_q / 2) + safety_stock) * unit_holding_cost
-        optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
-        
-        opt_max_inventory = order_up_to
-        opt_avg_inventory = ((avg_daily_demand * optimal_p_days) / 2) + safety_stock
-        expected_orders = (365 / optimal_p_days)
-        
-        opt_stockout_days = expected_orders * (1.0 - service_level)
-        opt_fill_rate = service_level
-        
-        rec_col1, rec_col2, rec_col3 = st.columns(3)
-        rec_col1.metric("Optimal Review Period (P)", f"{optimal_p_days} Days")
-        rec_col2.metric("Order Up-To Level (T)", f"{int(order_up_to)} units")
-        rec_col3.metric("Safety Stock Allocated", f"{int(safety_stock)} units")
-
-    # --- STEP 5: COST COMPARISON & VISUALIZATION ---
-    st.subheader("4. Cost Comparison: Actual vs. Optimized Model")
+    # --- STEP 6: COST COMPARISON & VISUALIZATION ---
+    st.subheader("4. Cost & Operations Comparison")
     
     leakage = actual_total_cost - optimal_total_cost
     
     if leakage > 0:
-        st.error(f"⚠️ **Annual Profit Leakage Detected:** ${leakage:,.2f} could be saved by optimizing order policies.")
+        st.error(f"⚠️ **Annual Profit Leakage Detected:** ${leakage:,.2f} could be saved compared to your customized policy setting.")
     else:
-        st.success("🎉 Your historical procurement pattern matches or outperforms the theoretical model balance!")
+        st.success("🎉 Your customized configuration matches or outperforms the historical baseline structure!")
 
-    # Complete Operational & Service Quality Summary Table
+    # Complete Operational, Financial & Capacity Performance Summary Table
     comparison_data = {
         "Metric & Operational Drivers": [
             "Average Inventory Level (Units)",
@@ -1248,7 +1269,7 @@ with tab5:
             f"${actual_total_holding_cost:,.2f}",
             f"${actual_total_cost:,.2f}"
         ],
-        f"Optimized ({review_system.split(' ')[0]})": [
+        "Selected Policy Setting": [
             f"{int(opt_avg_inventory):,}",
             f"{int(opt_max_inventory):,}",
             f"~{max(0, int(opt_stockout_days))} days",
@@ -1274,7 +1295,7 @@ with tab5:
     
     st.markdown("**Financial, Service Level & Capacity Summary Table**")
     st.dataframe(comp_df, use_container_width=True, hide_index=True)
-    st.caption("Note: Variance columns show excess metrics. Positive values under costs or stockouts indicate areas where optimization cuts down waste/risk.")
+    st.caption("Note: Positive variance values indicate operational waste or profit leakage in historical workflows compared to the inputs chosen above.")
 
     # High-contrast corporate blue-themed comparison bar layout
     categories = ['Ordering Cost', 'Holding Cost', 'Total Cost']
@@ -1287,7 +1308,7 @@ with tab5:
             marker_color='#B0C4DE'
         ),
         go.Bar(
-            name='Optimized Policy Cost', 
+            name='Policy Simulated Cost', 
             x=categories, 
             y=[optimal_ordering_cost, optimal_holding_cost, optimal_total_cost],
             marker_color='#1F77B4'
