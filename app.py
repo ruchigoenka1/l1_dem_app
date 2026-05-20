@@ -6,6 +6,7 @@ import io
 import plotly.graph_objects as go
 from prophet import Prophet
 from scipy.stats import norm
+import scipy.stats as stats
 
 # --- Session State Initialization ---
 if 'next_clicked' not in st.session_state:
