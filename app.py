@@ -17,7 +17,7 @@ st.set_page_config(page_title="Supply Chain Analytics Platform", layout="wide")
 
 st.title("🚀 Supply Chain Analytics Platform")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "Demand Simulator Game"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Average Demand", "📊 Demand Histogram", "📈 Demand Forecasting", "Demand Simulator Game", "Inventory Audit"])
 
 with tab1:
     st.header("The Basic Thumb Rule Used For Inventory Planning")
@@ -999,3 +999,207 @@ with tab4:
             )
     else:
         st.info("💡 Interaction Required: Execute steps using the gameplay action controls above to populate tables and performance metrics.")
+
+
+
+
+
+
+
+
+
+
+with tab5:
+    st.header("⚖️ Cost Optimization Engine")
+    st.markdown(
+        "Compare your actual procurement and holding costs against mathematically optimized inventory models "
+        "to identify potential profit leakage."
+    )
+    
+    # --- STEP 1: INPUT PARAMETERS ---
+    st.subheader("1. Parameters & Cost Drivers")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        holding_fixed = st.number_input("Fixed Holding Cost ($/year)", min_value=0.0, value=500.0, step=50.0, help="Warehouse insurance, security, climate control fixes.")
+        holding_var_pct = st.number_input("Variable Holding Cost (% of Item Cost/year)", min_value=0.0, max_value=100.0, value=15.0, step=1.0, help="Opportunity cost of capital, damage, obsolescence.") / 100.0
+        
+    with col2:
+        ordering_cost = st.number_input("Ordering Cost ($/order)", min_value=0.1, value=75.0, step=5.0, help="Freight flat fees, customs clearance, QA inspection, admin time.")
+        lead_time_days = st.number_input("Lead Time (Days)", min_value=1, value=14, step=1)
+        
+    with col3:
+        service_level = st.slider("Target Service Level (%)", min_value=50.0, max_value=99.9, value=95.0, step=0.5) / 100.0
+        review_system = st.radio("Inventory Review System Strategy", ["Continuous Review (Q, R)", "Periodic Review (P, T)"])
+
+    # --- STEP 2: DATA INGESTION ---
+    st.subheader("2. Upload Historical Invoices & Demand Data")
+    st.markdown("Upload a CSV containing daily or weekly demand records alongside actual purchase orders to baseline performance.")
+    
+    uploaded_file = st.file_uploader("Upload Inventory Ledger (CSV)", type=["csv"], help="Expected columns: 'Date', 'Demand_Qty', 'Purchase_Qty', 'Unit_Cost'")
+    
+    # Fallback to realistic mock data to keep the engine functional if no file is uploaded
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file)
+    else:
+        st.info("💡 Using a simulated 365-day ledger. Upload your own data above to customize the audit.")
+        # Generate clean baseline simulation data
+        np.random.seed(42)
+        dates = pd.date_range(start="2025-01-01", periods=365)
+        # Demand with minor seasonal variance
+        demand = np.random.normal(loc=50, scale=12, size=365).clip(0).astype(int)
+        
+        # Simulating sub-optimal human buying patterns (Infrequent large batches)
+        purchase = np.zeros(365)
+        purchase_indices = [15, 60, 110, 160, 210, 260, 315]
+        for idx in purchase_indices:
+            purchase[idx] = 2600
+            
+        df = pd.DataFrame({
+            "Date": dates,
+            "Demand_Qty": demand,
+            "Purchase_Qty": purchase,
+            "Unit_Cost": [25.0] * 365
+        })
+
+    # --- STEP 3: STATISTICAL ANALYSIS & CORES ---
+    # Calculate critical stats from data
+    total_demand = df["Demand_Qty"].sum()
+    avg_daily_demand = df["Demand_Qty"].mean()
+    std_daily_demand = df["Demand_Qty"].std()
+    avg_unit_cost = df["Unit_Cost"].mean()
+    
+    # Annualized metrics
+    annual_demand = avg_daily_demand * 365
+    unit_holding_cost = (holding_fixed / max(1, total_demand)) + (avg_unit_cost * holding_var_pct)
+    
+    # Lead time demand metrics
+    lt_demand_mean = avg_daily_demand * lead_time_days
+    lt_demand_std = std_daily_demand * np.sqrt(lead_time_days)
+    
+    # Z-score for service level
+    z_val = stats.norm.ppf(service_level)
+    
+    # --- STEP 4: MODEL RECOMMENDATIONS & CALCULATIONS ---
+    st.subheader("3. Optimization Recommendations")
+    
+    # Calculate Actuals from Ledger Data
+    actual_orders_placed = np.count_nonzero(df["Purchase_Qty"])
+    actual_total_ordering_cost = actual_orders_placed * ordering_cost
+    
+    # Trace inventory behavior to determine actual average stock levels
+    current_inv = 1.25 * lt_demand_mean  # Using stable starting balance logic
+    inv_levels = []
+    for _, row in df.iterrows():
+        current_inv += row["Purchase_Qty"] - row["Demand_Qty"]
+        inv_levels.append(max(0, current_inv))
+    
+    actual_avg_inventory = np.mean(inv_levels)
+    actual_total_holding_cost = actual_avg_inventory * unit_holding_cost
+    actual_total_cost = actual_total_ordering_cost + actual_total_holding_cost
+
+    # Calculate Optimal Models
+    if review_system == "Continuous Review (Q, R)":
+        # Economic Order Quantity (EOQ)
+        optimal_q = np.sqrt((2 * annual_demand * ordering_cost) / unit_holding_cost)
+        # Safety Stock & Reorder Point
+        safety_stock = z_val * lt_demand_std
+        reorder_point = lt_demand_mean + safety_stock
+        
+        # Expected optimal costs
+        optimal_ordering_cost = (annual_demand / optimal_q) * ordering_cost
+        optimal_holding_cost = ((optimal_q / 2) + safety_stock) * unit_holding_cost
+        optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
+        
+        # UI Outputs
+        rec_col1, rec_col2, rec_col3 = st.columns(3)
+        rec_col1.metric("Recommended Order Quantity (Q)", f"{int(optimal_q)} units")
+        rec_col2.metric("Reorder Point (ROP)", f"{int(reorder_point)} units")
+        rec_col3.metric("Safety Stock Allocated", f"{int(safety_stock)} units")
+        
+    else:  # Periodic Review (P, T)
+        # Optimal Review Period P (in years, based on EOQ logic)
+        optimal_p_years = np.sqrt((2 * ordering_cost) / (unit_holding_cost * annual_demand))
+        optimal_p_days = max(1, int(optimal_p_years * 365))
+        
+        # Review Period + Lead Time metrics
+        total_time_horizon = optimal_p_days + lead_time_days
+        p_lt_demand_mean = avg_daily_demand * total_time_horizon
+        p_lt_demand_std = std_daily_demand * np.sqrt(total_time_horizon)
+        
+        safety_stock = z_val * p_lt_demand_std
+        order_up_to = p_lt_demand_mean + safety_stock
+        
+        # Expected optimal costs for periodic system
+        optimal_ordering_cost = (365 / optimal_p_days) * ordering_cost
+        optimal_holding_cost = (((avg_daily_demand * optimal_p_days) / 2) + safety_stock) * unit_holding_cost
+        optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
+        
+        # UI Outputs
+        rec_col1, rec_col2, rec_col3 = st.columns(3)
+        rec_col1.metric("Optimal Review Period (P)", f"{optimal_p_days} Days")
+        rec_col2.metric("Order Up-To Level (T)", f"{int(order_up_to)} units")
+        rec_col3.metric("Safety Stock Allocated", f"{int(safety_stock)} units")
+
+    # --- STEP 5: COST COMPARISON & VISUALIZATION ---
+    st.subheader("4. Cost Comparison: Actual vs. Optimized Model")
+    
+    leakage = actual_total_cost - optimal_total_cost
+    
+    if leakage > 0:
+        st.error(f"⚠️ **Annual Profit Leakage Detected:** ${leakage:,.2f} could be saved by optimizing order policies.")
+    else:
+        st.success("🎉 Your historical procurement pattern matches or outperforms the theoretical model balance!")
+
+    # Display Absolute Data Breakdown
+    comp_col1, comp_col2 = st.columns(2)
+    with comp_col1:
+        st.markdown("**Historical Actuals Breakdown**")
+        st.write(f"• Orders Placed: `{actual_orders_placed}` runs")
+        st.write(f"• Total Ordering Cost: `${actual_total_ordering_cost:,.2f}`")
+        st.write(f"• Average Physical Stock Level: `{int(actual_avg_inventory)}` units")
+        st.write(f"• Total Holding Cost: `${actual_total_holding_cost:,.2f}`")
+        st.write(f"• **Total Evaluated Cost: ${actual_total_cost:,.2f}**")
+        
+    with comp_col2:
+        st.markdown(f"**Optimized `{review_system}` Breakdown**")
+        expected_orders = (annual_demand / optimal_q) if review_system == "Continuous Review (Q, R)" else (365 / optimal_p_days)
+        st.write(f"• Target Orders/Year: `{expected_orders:.1f}` runs")
+        st.write(f"• Target Ordering Cost: `${optimal_ordering_cost:,.2f}`")
+        expected_avg_stock = ((optimal_q / 2) + safety_stock) if review_system == "Continuous Review (Q, R)" else (((avg_daily_demand * optimal_p_days) / 2) + safety_stock)
+        st.write(f"• Target Average Stock Level: `{int(expected_avg_stock)}` units")
+        st.write(f"• Target Holding Cost: `${optimal_holding_cost:,.2f}`")
+        st.write(f"• **Optimized Target Cost: ${optimal_total_cost:,.2f}**")
+
+    # Clean, professional blue-themed comparison visualization
+    categories = ['Ordering Cost', 'Holding Cost', 'Total Cost']
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            name='Actual Historical Cost', 
+            x=categories, 
+            y=[actual_total_ordering_cost, actual_total_holding_cost, actual_total_cost],
+            marker_color='#B0C4DE' # Soft muted steel blue
+        ),
+        go.Bar(
+            name='Optimized Policy Cost', 
+            x=categories, 
+            y=[optimal_ordering_cost, optimal_holding_cost, optimal_total_cost],
+            marker_color='#1F77B4' # Strong royal blue
+        )
+    ])
+    
+    fig.update_layout(
+        barmode='group',
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+        yaxis_title="USD ($)",
+        font=dict(color="#333333"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=40, r=40, t=40, b=40)
+    )
+    
+    fig.update_yaxes(showgrid=True, gridcolor='#E5E5E5')
+    
+    st.plotly_chart(fig, use_container_width=True)
