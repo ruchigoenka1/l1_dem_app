@@ -1034,24 +1034,41 @@ with tab5:
         service_level = st.slider("Target Service Level (%)", min_value=50.0, max_value=99.9, value=95.0, step=0.5) / 100.0
         review_system = st.radio("Inventory Review System Strategy", ["Continuous Review (Q, R)", "Periodic Review (P, T)"])
 
-    # --- STEP 2: DATA INGESTION ---
+    # --- STEP 2: DATA INGESTION (CSV & EXCEL SUPPORTER) ---
     st.subheader("2. Upload Historical Invoices & Demand Data")
-    st.markdown("Upload a CSV containing daily or weekly demand records alongside actual purchase orders to baseline performance.")
+    st.markdown("Upload a CSV or Excel file containing daily or weekly demand records alongside actual purchase orders to baseline performance.")
     
-    uploaded_file = st.file_uploader("Upload Inventory Ledger (CSV)", type=["csv"], help="Expected columns: 'Date', 'Demand_Qty', 'Purchase_Qty', 'Unit_Cost'")
+    uploaded_file = st.file_uploader(
+        "Upload Inventory Ledger (CSV or Excel)", 
+        type=["csv", "xlsx", "xls"], 
+        help="Expected columns: 'Date', 'Demand_Qty', 'Purchase_Qty', 'Unit_Cost'"
+    )
     
-    # Fallback to realistic mock data to keep the engine functional if no file is uploaded
+    # Process file based on extension types with defensive checks
     if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
+        try:
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+                
+            required_cols = ["Date", "Demand_Qty", "Purchase_Qty", "Unit_Cost"]
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            
+            if missing_cols:
+                st.error(f"❌ Missing required columns: {', '.join(missing_cols)}. Please check your file formatting.")
+                st.stop()
+                
+        except Exception as e:
+            st.error(f"Error parsing file: {e}")
+            st.stop()
+            
     else:
         st.info("💡 Using a simulated 365-day ledger. Upload your own data above to customize the audit.")
-        # Generate clean baseline simulation data
         np.random.seed(42)
         dates = pd.date_range(start="2025-01-01", periods=365)
-        # Demand with minor seasonal variance
         demand = np.random.normal(loc=50, scale=12, size=365).clip(0).astype(int)
         
-        # Simulating sub-optimal human buying patterns (Infrequent large batches)
         purchase = np.zeros(365)
         purchase_indices = [15, 60, 110, 160, 210, 260, 315]
         for idx in purchase_indices:
@@ -1065,21 +1082,17 @@ with tab5:
         })
 
     # --- STEP 3: STATISTICAL ANALYSIS & CORES ---
-    # Calculate critical stats from data
     total_demand = df["Demand_Qty"].sum()
     avg_daily_demand = df["Demand_Qty"].mean()
     std_daily_demand = df["Demand_Qty"].std()
     avg_unit_cost = df["Unit_Cost"].mean()
     
-    # Annualized metrics
     annual_demand = avg_daily_demand * 365
     unit_holding_cost = (holding_fixed / max(1, total_demand)) + (avg_unit_cost * holding_var_pct)
     
-    # Lead time demand metrics
     lt_demand_mean = avg_daily_demand * lead_time_days
     lt_demand_std = std_daily_demand * np.sqrt(lead_time_days)
     
-    # Z-score for service level
     z_val = stats.norm.ppf(service_level)
     
     # --- STEP 4: MODEL RECOMMENDATIONS & CALCULATIONS ---
@@ -1089,8 +1102,8 @@ with tab5:
     actual_orders_placed = np.count_nonzero(df["Purchase_Qty"])
     actual_total_ordering_cost = actual_orders_placed * ordering_cost
     
-    # Trace inventory behavior to determine actual average stock levels
-    current_inv = 1.25 * lt_demand_mean  # Using stable starting balance logic
+    # Trace inventory behavior (using stable 1.25x trigger logic)
+    current_inv = 1.25 * lt_demand_mean  
     inv_levels = []
     for _, row in df.iterrows():
         current_inv += row["Purchase_Qty"] - row["Demand_Qty"]
@@ -1102,29 +1115,23 @@ with tab5:
 
     # Calculate Optimal Models
     if review_system == "Continuous Review (Q, R)":
-        # Economic Order Quantity (EOQ)
         optimal_q = np.sqrt((2 * annual_demand * ordering_cost) / unit_holding_cost)
-        # Safety Stock & Reorder Point
         safety_stock = z_val * lt_demand_std
         reorder_point = lt_demand_mean + safety_stock
         
-        # Expected optimal costs
         optimal_ordering_cost = (annual_demand / optimal_q) * ordering_cost
         optimal_holding_cost = ((optimal_q / 2) + safety_stock) * unit_holding_cost
         optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
         
-        # UI Outputs
         rec_col1, rec_col2, rec_col3 = st.columns(3)
         rec_col1.metric("Recommended Order Quantity (Q)", f"{int(optimal_q)} units")
         rec_col2.metric("Reorder Point (ROP)", f"{int(reorder_point)} units")
         rec_col3.metric("Safety Stock Allocated", f"{int(safety_stock)} units")
         
     else:  # Periodic Review (P, T)
-        # Optimal Review Period P (in years, based on EOQ logic)
         optimal_p_years = np.sqrt((2 * ordering_cost) / (unit_holding_cost * annual_demand))
         optimal_p_days = max(1, int(optimal_p_years * 365))
         
-        # Review Period + Lead Time metrics
         total_time_horizon = optimal_p_days + lead_time_days
         p_lt_demand_mean = avg_daily_demand * total_time_horizon
         p_lt_demand_std = std_daily_demand * np.sqrt(total_time_horizon)
@@ -1132,12 +1139,12 @@ with tab5:
         safety_stock = z_val * p_lt_demand_std
         order_up_to = p_lt_demand_mean + safety_stock
         
-        # Expected optimal costs for periodic system
+        # Approximate equivalent Q for cost structures
+        optimal_q = avg_daily_demand * optimal_p_days
         optimal_ordering_cost = (365 / optimal_p_days) * ordering_cost
-        optimal_holding_cost = (((avg_daily_demand * optimal_p_days) / 2) + safety_stock) * unit_holding_cost
+        optimal_holding_cost = ((optimal_q / 2) + safety_stock) * unit_holding_cost
         optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
         
-        # UI Outputs
         rec_col1, rec_col2, rec_col3 = st.columns(3)
         rec_col1.metric("Optimal Review Period (P)", f"{optimal_p_days} Days")
         rec_col2.metric("Order Up-To Level (T)", f"{int(order_up_to)} units")
@@ -1153,27 +1160,48 @@ with tab5:
     else:
         st.success("🎉 Your historical procurement pattern matches or outperforms the theoretical model balance!")
 
-    # Display Absolute Data Breakdown
-    comp_col1, comp_col2 = st.columns(2)
-    with comp_col1:
-        st.markdown("**Historical Actuals Breakdown**")
-        st.write(f"• Orders Placed: `{actual_orders_placed}` runs")
-        st.write(f"• Total Ordering Cost: `${actual_total_ordering_cost:,.2f}`")
-        st.write(f"• Average Physical Stock Level: `{int(actual_avg_inventory)}` units")
-        st.write(f"• Total Holding Cost: `${actual_total_holding_cost:,.2f}`")
-        st.write(f"• **Total Evaluated Cost: ${actual_total_cost:,.2f}**")
-        
-    with comp_col2:
-        st.markdown(f"**Optimized `{review_system}` Breakdown**")
-        expected_orders = (annual_demand / optimal_q) if review_system == "Continuous Review (Q, R)" else (365 / optimal_p_days)
-        st.write(f"• Target Orders/Year: `{expected_orders:.1f}` runs")
-        st.write(f"• Target Ordering Cost: `${optimal_ordering_cost:,.2f}`")
-        expected_avg_stock = ((optimal_q / 2) + safety_stock) if review_system == "Continuous Review (Q, R)" else (((avg_daily_demand * optimal_p_days) / 2) + safety_stock)
-        st.write(f"• Target Average Stock Level: `{int(expected_avg_stock)}` units")
-        st.write(f"• Target Holding Cost: `${optimal_holding_cost:,.2f}`")
-        st.write(f"• **Optimized Target Cost: ${optimal_total_cost:,.2f}**")
+    # Dynamic metrics building for table view
+    expected_orders = (annual_demand / optimal_q) if review_system == "Continuous Review (Q, R)" else (365 / optimal_p_days)
+    expected_avg_stock = ((optimal_q / 2) + safety_stock)
 
-    # Clean, professional blue-themed comparison visualization
+    comparison_data = {
+        "Metric & Operational Drivers": [
+            "Average Inventory Level (Units)",
+            "Total Orders Placed (Per Year)",
+            "Annual Ordering Cost ($)",
+            "Annual Holding Cost ($)",
+            "Total Operational Cost ($)"
+        ],
+        "Actual Historical": [
+            f"{int(actual_avg_inventory):,}",
+            f"{actual_orders_placed}",
+            f"${actual_total_ordering_cost:,.2f}",
+            f"${actual_total_holding_cost:,.2f}",
+            f"${actual_total_cost:,.2f}"
+        ],
+        f"Optimized ({review_system.split(' ')[0]})": [
+            f"{int(expected_avg_stock):,}",
+            f"{expected_orders:.1f}",
+            f"${optimal_ordering_cost:,.2f}",
+            f"${optimal_holding_cost:,.2f}",
+            f"${optimal_total_cost:,.2f}"
+        ],
+        "Variance / Potential Savings": [
+            f"{int(actual_avg_inventory - expected_avg_stock):,}",
+            f"{actual_orders_placed - expected_orders:+.1f}",
+            f"${actual_total_ordering_cost - optimal_ordering_cost:,.2f}",
+            f"${actual_total_holding_cost - optimal_holding_cost:,.2f}",
+            f"${leakage:,.2f}"
+        ]
+    }
+    
+    comp_df = pd.DataFrame(comparison_data)
+    
+    st.markdown("**Financial & Operational Summary Table**")
+    st.dataframe(comp_df, use_container_width=True, hide_index=True)
+    st.caption("Note: Variance figures show excess units/spend. Positive financial values indicate direct cost-reduction opportunities.")
+
+    # High-contrast corporate blue-themed comparison bar layout
     categories = ['Ordering Cost', 'Holding Cost', 'Total Cost']
     
     fig = go.Figure(data=[
@@ -1181,13 +1209,13 @@ with tab5:
             name='Actual Historical Cost', 
             x=categories, 
             y=[actual_total_ordering_cost, actual_total_holding_cost, actual_total_cost],
-            marker_color='#B0C4DE' # Soft muted steel blue
+            marker_color='#B0C4DE'
         ),
         go.Bar(
             name='Optimized Policy Cost', 
             x=categories, 
             y=[optimal_ordering_cost, optimal_holding_cost, optimal_total_cost],
-            marker_color='#1F77B4' # Strong royal blue
+            marker_color='#1F77B4'
         )
     ])
     
@@ -1198,9 +1226,8 @@ with tab5:
         yaxis_title="USD ($)",
         font=dict(color="#333333"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(l=40, r=40, t=40, b=40)
+        margin=dict(l=40, r=40, t=20, b=40)
     )
     
     fig.update_yaxes(showgrid=True, gridcolor='#E5E5E5')
-    
     st.plotly_chart(fig, use_container_width=True)
