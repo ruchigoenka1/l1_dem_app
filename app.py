@@ -713,13 +713,14 @@ with tab4:
         fig_rop_dist.add_vline(x=lt_avg_demand, line_width=2, line_dash="dash", line_color="#3A96FF", annotation_text="Expected Demand", annotation_position="top left")
         fig_rop_dist.add_vline(x=calculated_rop, line_width=2.5, line_color="#FF5A5A", annotation_text=f"ROP ({target_service_level}%)", annotation_position="top right")
         
-        # Fixed layout unpacking structure sequence
+        # FIXED MECHANISM: Removed local conflicting 'margin' override keyword parameter
         fig_rop_dist.update_layout(
             **shared_layout,
-            margin=dict(l=20, r=20, t=10, b=30),
             showlegend=False, 
             height=280
         )
+        # Safely adjust interior localized margins and axis constraints via modifiers
+        fig_rop_dist.update_layout(margin=dict(l=30, r=30, t=20, b=30))
         fig_rop_dist.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
         st.plotly_chart(fig_rop_dist, use_container_width=True)
 
