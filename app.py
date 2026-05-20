@@ -615,20 +615,20 @@ with tab4:
     col_cfg1, col_cfg2 = st.columns(2)
 
     with col_cfg1:
-        avg_demand = st.number_input("Average Demand", min_value=1, value=50, step=5, key="t4_avg_dem")
+        avg_demand = st.number_input("Average Daily Demand", min_value=1, value=50, step=5, key="t4_avg_dem")
         
     with col_cfg2:
         if dist_type == "Uniform":
-            variation = st.number_input("Variation (± From Average)", min_value=0, value=0, step=5, key="t4_variation")
+            variation = st.number_input("Daily Variation (± From Average)", min_value=0, value=25, step=5, key="t4_variation")
             low_bound = max(0, avg_demand - variation)
             high_bound = avg_demand + variation
             std_dev = 0
         else:
-            std_dev = st.number_input("Std Dev (Variation σ)", min_value=0.0, value=0.0, step=1.0, key="t4_std_dev")
+            std_dev = st.number_input("Daily Std Dev (σ)", min_value=0.0, value=10.0, step=1.0, key="t4_std_dev")
             low_bound, high_bound, variation = 0, 0, 0
 
     if dist_type == "Uniform":
-        st.markdown(f"🔹 *Active Range: **{low_bound}** to **{high_bound}** units*")
+        st.markdown(f"🔹 *Daily Range: **{low_bound}** to **{high_bound}** units*")
 
     st.markdown("### 2. Backlog & Stockout Policy")
     col_back1, col_back2 = st.columns(2)
@@ -643,18 +643,92 @@ with tab4:
             st.markdown("<div style='padding-top: 30px; color: gray; font-size: 14px;'>❌ Lost Sales Policy Active: Inventory cannot drop below 0.</div>", unsafe_allow_html=True)
             backlog_limit = 0
 
-    with st.expander("🛠️ Advanced Inventory Settings", expanded=False):
+    # =========================================================================
+    # NEW SECTION: DYNAMIC REORDER POINT (ROP) CALCULATOR & GRAPH
+    # =========================================================================
+    st.markdown("---")
+    st.markdown("### 📈 3. Reorder Point (ROP) Analytics & Math")
+    
+    col_rop1, col_rop2 = st.columns([1.2, 1.8])
+    
+    with col_rop1:
+        st.markdown("**ROP Target Parameters**")
+        lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
+        target_service_level = st.slider("Target Service Level (%)", min_value=50.0, max_value=99.9, value=95.0, step=0.5, key="t4_tsl")
+        
+        # --- Lead Time Statistical Scaling Math ---
+        lt_avg_demand = avg_demand * lead_time
+        
+        if dist_type == "Normal":
+            # Standard Deviation scales with square root of time
+            lt_std_dev = std_dev * np.sqrt(lead_time)
+            z_score = stats.norm.ppf(target_service_level / 100.0) if lt_std_dev > 0 else 0
+            safety_stock = int(np.ceil(z_score * lt_std_dev))
+            calculated_rop = int(np.ceil(lt_avg_demand + safety_stock))
+        else:
+            # Uniform distribution convolution over L days simulated via random sampling
+            # Provides an exact view of the shape transformation (Central Limit Theorem)
+            sim_rng = np.random.RandomState(42)
+            if variation == 0:
+                lt_samples = np.full(10000, lt_avg_demand)
+            else:
+                lt_samples = np.sum(sim_rng.randint(low_bound, high_bound + 1, size=(lead_time, 10000)), axis=0)
+            
+            calculated_rop = int(np.percentile(lt_samples, target_service_level))
+            safety_stock = max(0, calculated_rop - lt_avg_demand)
+
+        # Display the structural breakdown metrics
+        st.markdown("#### **Calculation Results**")
+        st.metric("Expected Lead Time Demand", f"{int(lt_avg_demand)} units")
+        st.metric("Required Safety Stock Buffer", f"{int(safety_stock)} units")
+        st.metric("Suggested Reorder Point (ROP)", f"{int(calculated_rop)} units")
+
+    with col_rop2:
+        st.markdown(f"**Total Demand Distribution Over {lead_time}-Day Lead Time Window**")
+        
+        # Generate distribution profile data points for rendering the curve
+        if dist_type == "Normal":
+            if lt_std_dev > 0:
+                x_axis_range = np.linspace(lt_avg_demand - 4*lt_std_dev, lt_avg_demand + 4*lt_std_dev, 200)
+                y_axis_density = stats.norm.pdf(x_axis_range, lt_avg_demand, lt_std_dev)
+            else:
+                x_axis_range = np.array([lt_avg_demand - 5, lt_avg_demand, lt_avg_demand + 5])
+                y_axis_density = np.array([0, 1, 0])
+            
+            fig_rop_dist = go.Figure()
+            fig_rop_dist.add_trace(go.Scatter(x=x_axis_range, y=y_axis_density, mode='lines', line=dict(color='#A370F7', width=3), name='Probability Density', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
+        else:
+            # For uniform, plot a direct preview histogram of what the combined days look like
+            counts, bins = np.histogram(lt_samples, bins='auto', density=True)
+            bin_centers = 0.5 * (bins[:-1] + bins[1:])
+            fig_rop_dist = go.Figure()
+            fig_rop_dist.add_trace(go.Scatter(x=bin_centers, y=counts, mode='lines', line=dict(color='#A370F7', width=3, shape='spline'), name='Compounded Shape', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
+
+        # Add vertical line indicator tags for strategic thresholds
+        fig_rop_dist.add_vline(x=lt_avg_demand, line_width=2, line_dash="dash", line_color="#3A96FF", annotation_text="Expected Demand", annotation_position="top left")
+        fig_rop_dist.add_vline(x=calculated_rop, line_width=2.5, line_color="#FF5A5A", annotation_text=f"ROP ({target_service_level}%)", annotation_position="top right")
+        
+        fig_rop_dist.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#E0E0E0", family="sans-serif"), margin=dict(l=20, r=20, t=10, b=30),
+            xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.05)", zeroline=False),
+            yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
+            showlegend=False, height=280
+        )
+        st.plotly_chart(fig_rop_dist, use_container_width=True)
+
+    # Automatically map the computed ROP target into our game settings expansion tray dynamically
+    with st.expander("🛠️ Advanced Asset Deployment Settings", expanded=False):
         col_inv1, col_inv2, col_inv3 = st.columns(3)
         with col_inv1:
-            reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=150, step=10, key="t4_rop")
+            reorder_point = st.number_input("Reorder Point (ROP)", min_value=0, value=calculated_rop, step=10, key="t4_rop")
         with col_inv2:
             starting_inventory = st.number_input("Starting On-Hand Inventory", min_value=1, value=188, step=10, key="t4_start_inv")
         with col_inv3:
             order_qty = st.number_input("Replenishment Batch Size (Q)", min_value=1, value=200, step=10, key="t4_q")
-            lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
 
     # =========================================================================
-    # SECTION 2: SUPPLY CHAIN ENGINE
+    # SECTION 3: CORE SIMULATION ENGINE
     # =========================================================================
     if 't4_history' not in st.session_state:
         st.session_state.t4_history = pd.DataFrame(columns=[
@@ -700,7 +774,7 @@ with tab4:
             
             updated_opening_stock = current_inv
             
-            # Demand Gen (Handles 0 variation smoothly)
+            # Demand Gen
             if dist_type == "Normal":
                 demand = max(0, int(rng.normal(float(avg_demand), float(std_dev))))
             else:
@@ -782,10 +856,10 @@ with tab4:
     st.markdown("---")
 
     # =========================================================================
-    # SECTION 3: INTERACTIVE GAMEPLAY BUTTONS
+    # SECTION 4: SIMULATION INTERACTION BUTTONS
     # =========================================================================
     st.subheader("🕹️ Simulation Actions")
-    col_btn1, col_btn2, col_space = st.columns([1, 1.5, 2])
+    col_btn1, col_btn2 = st.columns([1, 1.5])
 
     with col_btn1:
         if st.button("☀️ Next Day (Single Step)", use_container_width=True, key="t4_step_btn"):
@@ -797,15 +871,10 @@ with tab4:
             run_simulation_steps(sim_days)
 
     # =========================================================================
-    # SECTION 4: VISUALIZATIONS & TIMELINE LEDGERS (WITH 5-COLUMN MATRIX)
+    # SECTION 5: REAL-TIME ANALYTICS LEDGERS
     # =========================================================================
     if not st.session_state.t4_history.empty:
         df = st.session_state.t4_history
-        
-        if 'Unfulfilled Backlog' not in df.columns:
-            df['Unfulfilled Backlog'] = 0
-        if 'Total Pipeline Inventory' not in df.columns:
-            df['Total Pipeline Inventory'] = 0
         
         total_shortages = df['Shortage'].sum()
         stockout_days = int((df['Shortage'] > 0).sum())
@@ -814,7 +883,6 @@ with tab4:
         st.markdown("---")
         st.subheader("📊 Live Performance Scoreboard")
         
-        # Split scoreboard into 5 clean columns
         m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Current Day", int(df['Day'].iloc[-1]))
         m2.metric("Closing Stock", f"{int(df['Closing Inventory'].iloc[-1])} units")
@@ -824,13 +892,6 @@ with tab4:
 
         st.subheader("📈 Real-Time Tracking Analytics")
         col_graph1, col_graph2 = st.columns(2)
-
-        shared_layout = dict(
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#E0E0E0", family="sans-serif"), margin=dict(l=40, r=20, t=30, b=40),
-            xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)"),
-            yaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)")
-        )
 
         with col_graph1:
             st.markdown("**Inventory Tracking Over Time**")
