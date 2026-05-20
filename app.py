@@ -606,6 +606,18 @@ with tab4:
     """)
 
     # =========================================================================
+    # GLOBAL VISUAL STYLE LAYOUT CONFIGURATION
+    # =========================================================================
+    shared_layout = dict(
+        paper_bgcolor="rgba(0,0,0,0)", 
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#E0E0E0", family="sans-serif"), 
+        margin=dict(l=40, r=20, t=30, b=40),
+        xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)"),
+        yaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.07)", zeroline=False, linecolor="rgba(255, 255, 255, 0.15)")
+    )
+
+    # =========================================================================
     # SECTION 1: DATA CONFIGURATION
     # =========================================================================
     st.markdown("### 1. Data Configuration")
@@ -644,7 +656,7 @@ with tab4:
             backlog_limit = 0
 
     # =========================================================================
-    # NEW SECTION: DYNAMIC REORDER POINT (ROP) CALCULATOR & GRAPH
+    # SECTION 2: DYNAMIC REORDER POINT (ROP) CALCULATOR & GRAPH
     # =========================================================================
     st.markdown("---")
     st.markdown("### 📈 3. Reorder Point (ROP) Analytics & Math")
@@ -656,18 +668,15 @@ with tab4:
         lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
         target_service_level = st.slider("Target Service Level (%)", min_value=50.0, max_value=99.9, value=95.0, step=0.5, key="t4_tsl")
         
-        # --- Lead Time Statistical Scaling Math ---
+        # Lead Time Statistical Scaling Math
         lt_avg_demand = avg_demand * lead_time
         
         if dist_type == "Normal":
-            # Standard Deviation scales with square root of time
             lt_std_dev = std_dev * np.sqrt(lead_time)
             z_score = stats.norm.ppf(target_service_level / 100.0) if lt_std_dev > 0 else 0
             safety_stock = int(np.ceil(z_score * lt_std_dev))
             calculated_rop = int(np.ceil(lt_avg_demand + safety_stock))
         else:
-            # Uniform distribution convolution over L days simulated via random sampling
-            # Provides an exact view of the shape transformation (Central Limit Theorem)
             sim_rng = np.random.RandomState(42)
             if variation == 0:
                 lt_samples = np.full(10000, lt_avg_demand)
@@ -677,7 +686,6 @@ with tab4:
             calculated_rop = int(np.percentile(lt_samples, target_service_level))
             safety_stock = max(0, calculated_rop - lt_avg_demand)
 
-        # Display the structural breakdown metrics
         st.markdown("#### **Calculation Results**")
         st.metric("Expected Lead Time Demand", f"{int(lt_avg_demand)} units")
         st.metric("Required Safety Stock Buffer", f"{int(safety_stock)} units")
@@ -686,7 +694,6 @@ with tab4:
     with col_rop2:
         st.markdown(f"**Total Demand Distribution Over {lead_time}-Day Lead Time Window**")
         
-        # Generate distribution profile data points for rendering the curve
         if dist_type == "Normal":
             if lt_std_dev > 0:
                 x_axis_range = np.linspace(lt_avg_demand - 4*lt_std_dev, lt_avg_demand + 4*lt_std_dev, 200)
@@ -698,26 +705,24 @@ with tab4:
             fig_rop_dist = go.Figure()
             fig_rop_dist.add_trace(go.Scatter(x=x_axis_range, y=y_axis_density, mode='lines', line=dict(color='#A370F7', width=3), name='Probability Density', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
         else:
-            # For uniform, plot a direct preview histogram of what the combined days look like
             counts, bins = np.histogram(lt_samples, bins='auto', density=True)
             bin_centers = 0.5 * (bins[:-1] + bins[1:])
             fig_rop_dist = go.Figure()
             fig_rop_dist.add_trace(go.Scatter(x=bin_centers, y=counts, mode='lines', line=dict(color='#A370F7', width=3, shape='spline'), name='Compounded Shape', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
 
-        # Add vertical line indicator tags for strategic thresholds
         fig_rop_dist.add_vline(x=lt_avg_demand, line_width=2, line_dash="dash", line_color="#3A96FF", annotation_text="Expected Demand", annotation_position="top left")
         fig_rop_dist.add_vline(x=calculated_rop, line_width=2.5, line_color="#FF5A5A", annotation_text=f"ROP ({target_service_level}%)", annotation_position="top right")
         
+        # Fixed layout unpacking structure sequence
         fig_rop_dist.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#E0E0E0", family="sans-serif"), margin=dict(l=20, r=20, t=10, b=30),
-            xaxis=dict(showgrid=True, gridcolor="rgba(255, 255, 255, 0.05)", zeroline=False),
-            yaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-            showlegend=False, height=280
+            **shared_layout,
+            margin=dict(l=20, r=20, t=10, b=30),
+            showlegend=False, 
+            height=280
         )
+        fig_rop_dist.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
         st.plotly_chart(fig_rop_dist, use_container_width=True)
 
-    # Automatically map the computed ROP target into our game settings expansion tray dynamically
     with st.expander("🛠️ Advanced Asset Deployment Settings", expanded=False):
         col_inv1, col_inv2, col_inv3 = st.columns(3)
         with col_inv1:
