@@ -656,73 +656,77 @@ with tab4:
             backlog_limit = 0
 
     # =========================================================================
-    # SECTION 2: DYNAMIC REORDER POINT (ROP) CALCULATOR & GRAPH
+    # SECTION 2: COLLAPSIBLE REORDER POINT (ROP) CALCULATOR & GRAPH
     # =========================================================================
     st.markdown("---")
-    st.markdown("### 📈 3. Reorder Point (ROP) Analytics & Math")
     
-    col_rop1, col_rop2 = st.columns([1.2, 1.8])
-    
-    with col_rop1:
-        st.markdown("**ROP Target Parameters**")
-        lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
-        target_service_level = st.slider("Target Service Level (%)", min_value=50.0, max_value=99.9, value=95.0, step=0.5, key="t4_tsl")
+    # Wrapped entirely inside a collapsible tray container
+    with st.expander("📈 View Reorder Point (ROP) Analytics & Lead Time Math", expanded=False):
+        col_rop1, col_rop2 = st.columns([1.2, 1.8])
         
-        # Lead Time Statistical Scaling Math
-        lt_avg_demand = avg_demand * lead_time
-        
-        if dist_type == "Normal":
-            lt_std_dev = std_dev * np.sqrt(lead_time)
-            z_score = stats.norm.ppf(target_service_level / 100.0) if lt_std_dev > 0 else 0
-            safety_stock = int(np.ceil(z_score * lt_std_dev))
-            calculated_rop = int(np.ceil(lt_avg_demand + safety_stock))
-        else:
-            sim_rng = np.random.RandomState(42)
-            if variation == 0:
-                lt_samples = np.full(10000, lt_avg_demand)
-            else:
-                lt_samples = np.sum(sim_rng.randint(low_bound, high_bound + 1, size=(lead_time, 10000)), axis=0)
+        with col_rop1:
+            st.markdown("**ROP Target Parameters**")
+            lead_time = st.number_input("Supplier Lead Time (Days)", min_value=1, value=3, step=1, key="t4_lt")
+            target_service_level = st.slider("Target Service Level (%)", min_value=50.0, max_value=99.9, value=95.0, step=0.5, key="t4_tsl")
             
-            calculated_rop = int(np.percentile(lt_samples, target_service_level))
-            safety_stock = max(0, calculated_rop - lt_avg_demand)
-
-        st.markdown("#### **Calculation Results**")
-        st.metric("Expected Lead Time Demand", f"{int(lt_avg_demand)} units")
-        st.metric("Required Safety Stock Buffer", f"{int(safety_stock)} units")
-        st.metric("Suggested Reorder Point (ROP)", f"{int(calculated_rop)} units")
-
-    with col_rop2:
-        st.markdown(f"**Total Demand Distribution Over {lead_time}-Day Lead Time Window**")
-        
-        if dist_type == "Normal":
-            if lt_std_dev > 0:
-                x_axis_range = np.linspace(lt_avg_demand - 4*lt_std_dev, lt_avg_demand + 4*lt_std_dev, 200)
-                y_axis_density = stats.norm.pdf(x_axis_range, lt_avg_demand, lt_std_dev)
-            else:
-                x_axis_range = np.array([lt_avg_demand - 5, lt_avg_demand, lt_avg_demand + 5])
-                y_axis_density = np.array([0, 1, 0])
+            # Lead Time Statistical Scaling Math
+            lt_avg_demand = avg_demand * lead_time
             
-            fig_rop_dist = go.Figure()
-            fig_rop_dist.add_trace(go.Scatter(x=x_axis_range, y=y_axis_density, mode='lines', line=dict(color='#A370F7', width=3), name='Probability Density', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
-        else:
-            counts, bins = np.histogram(lt_samples, bins='auto', density=True)
-            bin_centers = 0.5 * (bins[:-1] + bins[1:])
-            fig_rop_dist = go.Figure()
-            fig_rop_dist.add_trace(go.Scatter(x=bin_centers, y=counts, mode='lines', line=dict(color='#A370F7', width=3, shape='spline'), name='Compounded Shape', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
+            if dist_type == "Normal":
+                lt_std_dev = std_dev * np.sqrt(lead_time)
+                z_score = stats.norm.ppf(target_service_level / 100.0) if lt_std_dev > 0 else 0
+                safety_stock = int(np.ceil(z_score * lt_std_dev))
+                calculated_rop = int(np.ceil(lt_avg_demand + safety_stock))
+            else:
+                sim_rng = np.random.RandomState(42)
+                if variation == 0:
+                    lt_samples = np.full(10000, lt_avg_demand)
+                else:
+                    lt_samples = np.sum(sim_rng.randint(low_bound, high_bound + 1, size=(lead_time, 10000)), axis=0)
+                
+                calculated_rop = int(np.percentile(lt_samples, target_service_level))
+                safety_stock = max(0, calculated_rop - lt_avg_demand)
 
-        fig_rop_dist.add_vline(x=lt_avg_demand, line_width=2, line_dash="dash", line_color="#3A96FF", annotation_text="Expected Demand", annotation_position="top left")
-        fig_rop_dist.add_vline(x=calculated_rop, line_width=2.5, line_color="#FF5A5A", annotation_text=f"ROP ({target_service_level}%)", annotation_position="top right")
-        
-        # FIXED MECHANISM: Removed local conflicting 'margin' override keyword parameter
-        fig_rop_dist.update_layout(
-            **shared_layout,
-            showlegend=False, 
-            height=280
-        )
-        # Safely adjust interior localized margins and axis constraints via modifiers
-        fig_rop_dist.update_layout(margin=dict(l=30, r=30, t=20, b=30))
-        fig_rop_dist.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
-        st.plotly_chart(fig_rop_dist, use_container_width=True)
+            st.markdown("#### **Calculation Results**")
+            st.metric("Expected Lead Time Demand", f"{int(lt_avg_demand)} units")
+            st.metric("Required Safety Stock Buffer", f"{int(safety_stock)} units")
+            st.metric("Suggested Reorder Point (ROP)", f"{int(calculated_rop)} units")
+
+        with col_rop2:
+            st.markdown(f"**Total Demand Distribution Over {lead_time}-Day Lead Time Window**")
+            
+            if dist_type == "Normal":
+                if lt_std_dev > 0:
+                    x_axis_range = np.linspace(lt_avg_demand - 4*lt_std_dev, lt_avg_demand + 4*lt_std_dev, 200)
+                    y_axis_density = stats.norm.pdf(x_axis_range, lt_avg_demand, lt_std_dev)
+                else:
+                    x_axis_range = np.array([lt_avg_demand - 5, lt_avg_demand, lt_avg_demand + 5])
+                    y_axis_density = np.array([0, 1, 0])
+                
+                fig_rop_dist = go.Figure()
+                fig_rop_dist.add_trace(go.Scatter(x=x_axis_range, y=y_axis_density, mode='lines', line=dict(color='#A370F7', width=3), name='Probability Density', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
+            else:
+                counts, bins = np.histogram(lt_samples, bins='auto', density=True)
+                bin_centers = 0.5 * (bins[:-1] + bins[1:])
+                fig_rop_dist = go.Figure()
+                fig_rop_dist.add_trace(go.Scatter(x=bin_centers, y=counts, mode='lines', line=dict(color='#A370F7', width=3, shape='spline'), name='Compounded Shape', fill='tozeroy', fillcolor='rgba(163, 112, 247, 0.1)'))
+
+            fig_rop_dist.add_vline(x=lt_avg_demand, line_width=2, line_dash="dash", line_color="#3A96FF", annotation_text="Expected Demand", annotation_position="top left")
+            fig_rop_dist.add_vline(x=calculated_rop, line_width=2.5, line_color="#FF5A5A", annotation_text=f"ROP ({target_service_level}%)", annotation_position="top right")
+            
+            fig_rop_dist.update_layout(
+                **shared_layout,
+                showlegend=False, 
+                height=280
+            )
+            fig_rop_dist.update_layout(margin=dict(l=30, r=30, t=20, b=30))
+            fig_rop_dist.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
+            st.plotly_chart(fig_rop_dist, use_container_width=True)
+
+    # Added fallback logic if expander hasn't run yet to prevent initialization crashes
+    if 'calculated_rop' not in locals():
+        calculated_rop = 150
+        lead_time = 3
 
     with st.expander("🛠️ Advanced Asset Deployment Settings", expanded=False):
         col_inv1, col_inv2, col_inv3 = st.columns(3)
