@@ -1034,7 +1034,7 @@ with tab5:
         service_level = st.slider("Target Service Level (%)", min_value=50.0, max_value=99.9, value=95.0, step=0.5) / 100.0
         review_system = st.radio("Inventory Review System Strategy", ["Continuous Review (Q, R)", "Periodic Review (P, T)"])
 
-    # --- STEP 2: DATA INGESTION (CSV & EXCEL SUPPORTER) ---
+    # --- STEP 2: DATA INGESTION (CSV & EXCEL COMPATIBLE) ---
     st.subheader("2. Upload Historical Invoices & Demand Data")
     st.markdown("Upload a CSV or Excel file containing daily or weekly demand records alongside actual purchase orders to baseline performance.")
     
@@ -1044,7 +1044,7 @@ with tab5:
         help="Expected columns: 'Date', 'Demand_Qty', 'Purchase_Qty', 'Unit_Cost'"
     )
     
-    # Process file based on extension types with defensive checks
+    # Process file based on extension types with defensive validation
     if uploaded_file is not None:
         try:
             if uploaded_file.name.endswith('.csv'):
@@ -1081,7 +1081,44 @@ with tab5:
             "Unit_Cost": [25.0] * 365
         })
 
-    # --- STEP 3: STATISTICAL ANALYSIS & CORES ---
+    # --- STEP 2.5: COLLAPSIBLE HISTOGRAM BREAKDOWN ---
+    with st.expander("📊 View Demand Distribution & Volatility Histogram", expanded=False):
+        st.markdown(
+            "An open view of historical demand frequency. A highly skewed distribution or multiple remote "
+            "peaks indicates an erratic buying pattern that standard average-based calculations typically fail to manage."
+        )
+        
+        show_zeros = st.checkbox("Include zero-demand days in distribution", value=True)
+        plot_df = df if show_zeros else df[df["Demand_Qty"] > 0]
+        
+        if plot_df.empty:
+            st.warning("No data points available with the current filter settings.")
+        else:
+            hist_fig = go.Figure()
+            hist_fig.add_trace(go.Histogram(
+                x=plot_df["Demand_Qty"],
+                name="Demand Frequency",
+                marker_color='#1F77B4',  # Strong royal blue
+                opacity=0.75,
+                xbins=dict(start=0, size=max(1, int(plot_df["Demand_Qty"].max() / 20)))
+            ))
+            
+            hist_fig.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                xaxis_title="Demand Quantity (Units / Day)",
+                yaxis_title="Frequency (Days / Year)",
+                font=dict(color="#333333"),
+                margin=dict(l=40, r=40, t=10, b=40),
+                height=350
+            )
+            
+            hist_fig.update_yaxes(showgrid=True, gridcolor='#E5E5E5')
+            hist_fig.update_xaxes(showgrid=True, gridcolor='#E5E5E5')
+            
+            st.plotly_chart(hist_fig, use_container_width=True)
+
+    # --- STEP 3: STATISTICAL BREAKDOWN ---
     total_demand = df["Demand_Qty"].sum()
     avg_daily_demand = df["Demand_Qty"].mean()
     std_daily_demand = df["Demand_Qty"].std()
@@ -1095,25 +1132,41 @@ with tab5:
     
     z_val = stats.norm.ppf(service_level)
     
-    # --- STEP 4: MODEL RECOMMENDATIONS & CALCULATIONS ---
+    # --- STEP 4: MODEL RECOMMENDATIONS & HISTORICAL SIMULATION ---
     st.subheader("3. Optimization Recommendations")
     
     # Calculate Actuals from Ledger Data
     actual_orders_placed = np.count_nonzero(df["Purchase_Qty"])
     actual_total_ordering_cost = actual_orders_placed * ordering_cost
     
-    # Trace inventory behavior (using stable 1.25x trigger logic)
-    current_inv = 1.25 * lt_demand_mean  
-    inv_levels = []
-    for _, row in df.iterrows():
-        current_inv += row["Purchase_Qty"] - row["Demand_Qty"]
-        inv_levels.append(max(0, current_inv))
+    # Day-by-Day Balance Trace Simulation
+    current_inv_act = 1.25 * lt_demand_mean  # Starts safely above typical demand triggers
+    inv_levels_act = []
+    stockout_days_act = 0
+    unfulfilled_demand_act = 0
     
-    actual_avg_inventory = np.mean(inv_levels)
+    for _, row in df.iterrows():
+        demand_today = row["Demand_Qty"]
+        current_inv_act += row["Purchase_Qty"]
+        
+        if current_inv_act < demand_today:
+            unfulfilled_demand_act += (demand_today - current_inv_act)
+            if current_inv_act <= 0:
+                stockout_days_act += 1
+            current_inv_act = 0
+        else:
+            current_inv_act -= demand_today
+            
+        inv_levels_act.append(current_inv_act)
+    
+    actual_max_inventory = np.max(inv_levels_act)
+    actual_avg_inventory = np.mean(inv_levels_act)
+    actual_fill_rate = max(0.0, 1.0 - (unfulfilled_demand_act / max(1, total_demand)))
+    
     actual_total_holding_cost = actual_avg_inventory * unit_holding_cost
     actual_total_cost = actual_total_ordering_cost + actual_total_holding_cost
 
-    # Calculate Optimal Models
+    # Process Optimal Models & Predict Performance
     if review_system == "Continuous Review (Q, R)":
         optimal_q = np.sqrt((2 * annual_demand * ordering_cost) / unit_holding_cost)
         safety_stock = z_val * lt_demand_std
@@ -1122,6 +1175,13 @@ with tab5:
         optimal_ordering_cost = (annual_demand / optimal_q) * ordering_cost
         optimal_holding_cost = ((optimal_q / 2) + safety_stock) * unit_holding_cost
         optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
+        
+        opt_max_inventory = optimal_q + safety_stock
+        opt_avg_inventory = (optimal_q / 2) + safety_stock
+        expected_orders = (annual_demand / optimal_q)
+        
+        opt_stockout_days = expected_orders * (1.0 - service_level)
+        opt_fill_rate = service_level
         
         rec_col1, rec_col2, rec_col3 = st.columns(3)
         rec_col1.metric("Recommended Order Quantity (Q)", f"{int(optimal_q)} units")
@@ -1139,11 +1199,17 @@ with tab5:
         safety_stock = z_val * p_lt_demand_std
         order_up_to = p_lt_demand_mean + safety_stock
         
-        # Approximate equivalent Q for cost structures
         optimal_q = avg_daily_demand * optimal_p_days
         optimal_ordering_cost = (365 / optimal_p_days) * ordering_cost
         optimal_holding_cost = ((optimal_q / 2) + safety_stock) * unit_holding_cost
         optimal_total_cost = optimal_ordering_cost + optimal_holding_cost
+        
+        opt_max_inventory = order_up_to
+        opt_avg_inventory = ((avg_daily_demand * optimal_p_days) / 2) + safety_stock
+        expected_orders = (365 / optimal_p_days)
+        
+        opt_stockout_days = expected_orders * (1.0 - service_level)
+        opt_fill_rate = service_level
         
         rec_col1, rec_col2, rec_col3 = st.columns(3)
         rec_col1.metric("Optimal Review Period (P)", f"{optimal_p_days} Days")
@@ -1160,13 +1226,13 @@ with tab5:
     else:
         st.success("🎉 Your historical procurement pattern matches or outperforms the theoretical model balance!")
 
-    # Dynamic metrics building for table view
-    expected_orders = (annual_demand / optimal_q) if review_system == "Continuous Review (Q, R)" else (365 / optimal_p_days)
-    expected_avg_stock = ((optimal_q / 2) + safety_stock)
-
+    # Complete Operational & Service Quality Summary Table
     comparison_data = {
         "Metric & Operational Drivers": [
             "Average Inventory Level (Units)",
+            "Maximum Inventory Level (Units)",
+            "Stockout Events (Days/Year)",
+            "Order Fill Rate (%)",
             "Total Orders Placed (Per Year)",
             "Annual Ordering Cost ($)",
             "Annual Holding Cost ($)",
@@ -1174,20 +1240,29 @@ with tab5:
         ],
         "Actual Historical": [
             f"{int(actual_avg_inventory):,}",
+            f"{int(actual_max_inventory):,}",
+            f"{stockout_days_act} days",
+            f"{actual_fill_rate * 100:.1f}%",
             f"{actual_orders_placed}",
             f"${actual_total_ordering_cost:,.2f}",
             f"${actual_total_holding_cost:,.2f}",
             f"${actual_total_cost:,.2f}"
         ],
         f"Optimized ({review_system.split(' ')[0]})": [
-            f"{int(expected_avg_stock):,}",
+            f"{int(opt_avg_inventory):,}",
+            f"{int(opt_max_inventory):,}",
+            f"~{max(0, int(opt_stockout_days))} days",
+            f"{opt_fill_rate * 100:.1f}%",
             f"{expected_orders:.1f}",
             f"${optimal_ordering_cost:,.2f}",
             f"${optimal_holding_cost:,.2f}",
             f"${optimal_total_cost:,.2f}"
         ],
-        "Variance / Potential Savings": [
-            f"{int(actual_avg_inventory - expected_avg_stock):,}",
+        "Variance / Improvement Potential": [
+            f"{int(actual_avg_inventory - opt_avg_inventory):,}",
+            f"{int(actual_max_inventory - opt_max_inventory):,}",
+            f"{stockout_days_act - max(0, int(opt_stockout_days)):+d} days",
+            f"{(opt_fill_rate - actual_fill_rate) * 100:+.1f}% points",
             f"{actual_orders_placed - expected_orders:+.1f}",
             f"${actual_total_ordering_cost - optimal_ordering_cost:,.2f}",
             f"${actual_total_holding_cost - optimal_holding_cost:,.2f}",
@@ -1197,9 +1272,9 @@ with tab5:
     
     comp_df = pd.DataFrame(comparison_data)
     
-    st.markdown("**Financial & Operational Summary Table**")
+    st.markdown("**Financial, Service Level & Capacity Summary Table**")
     st.dataframe(comp_df, use_container_width=True, hide_index=True)
-    st.caption("Note: Variance figures show excess units/spend. Positive financial values indicate direct cost-reduction opportunities.")
+    st.caption("Note: Variance columns show excess metrics. Positive values under costs or stockouts indicate areas where optimization cuts down waste/risk.")
 
     # High-contrast corporate blue-themed comparison bar layout
     categories = ['Ordering Cost', 'Holding Cost', 'Total Cost']
